@@ -1,12 +1,18 @@
+
 import argparse
 
-from generation_sbgm import GenerationSBGM
+import matplotlib.pyplot as plt
 
-def generate_from_args():
+from evaluation import Evaluation
+
+def evaluate_from_args():
     '''
         Launch the training from the command line arguments
     '''
     
+
+
+
 
     parser = argparse.ArgumentParser(description='Train a model for the downscaling of climate data')
     parser.add_argument('--HR_VAR', type=str, default='temp', help='The high resolution variable')
@@ -72,21 +78,26 @@ def generate_from_args():
     parser.add_argument('--gen_years', type=list, default=[1991, 2020], help='The years to generate samples from')
     args = parser.parse_args()
 
-    # Use the GenerationSBGM class to launch the generation
-    generation = GenerationSBGM(args)
+    # Launch the training
+    evaluation_single = Evaluation(args, generated_sample_type='single')
 
-    # Launch the multiple sample generation
-    generation.generate_multiple_samples(8)
+    # fig, axs = evaluation_single.plot_example_images(masked=True, plot_with_cond=True, plot_with_lsm=True, show_figs=True)
 
-    # Launch the single sample generation
-    generation.generate_single_sample()
+    evaluation_repeated = Evaluation(args, generated_sample_type='repeated')
 
-    # Launch the repeated single sample generation
-    generation.generate_repeated_single_sample(8)
+    # fig, axs = evaluation_repeated.plot_example_images(masked=True, plot_with_cond=False, plot_with_lsm=True, show_figs=True, n_samples=4)
 
-    # # Launch the generation
-    # generation_sbgm(args)
+    evaluation_multiple = Evaluation(args, generated_sample_type='multiple')
+
+    evaluation_multiple.spatial_statistics(show_figs=True)
+    # fig, axs = evaluation_multiple.plot_example_images(masked=False, plot_with_cond=False, plot_with_lsm=True, show_figs=True, n_samples=4, same_cbar=False)
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
-    generate_from_args()
+    evaluate_from_args()
