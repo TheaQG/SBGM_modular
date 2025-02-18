@@ -4,7 +4,7 @@ import argparse
 
 import numpy as np
 
-from utils import convert_npz_to_zarr
+from utils import *
 
 
 def create_train_valid_test_data_zarr(args):
@@ -219,9 +219,9 @@ def launch_split_from_args():
     parser.add_argument('--hr_var', type=str, default='temp', help='The high resolution variable')
     parser.add_argument('--lr_var', type=str, default='temp', help='The low resolution variable')
     parser.add_argument('--data_split_type', type=str, default='Time', help='The data split type')
-    parser.add_argument('--train_years', type=list, default=np.arange(1990, 2015).astype(str), help='The training years')
-    parser.add_argument('--valid_years', type=list, default=np.arange(2015, 2018).astype(str), help='The validation years')
-    parser.add_argument('--test_years', type=list, default=np.arange(2018, 2021).astype(str), help='The test years')
+    parser.add_argument('--train_years', type=str2list, default=np.arange(1990, 2015).astype(str), help='The training years')
+    parser.add_argument('--valid_years', type=str2list, default=np.arange(2015, 2018).astype(str), help='The validation years')
+    parser.add_argument('--test_years', type=str2list, default=np.arange(2018, 2021).astype(str), help='The test years')
     parser.add_argument('--train_frac', type=float, default=0.7, help='The training fraction')
     parser.add_argument('--valid_frac', type=float, default=0.1, help='The validation fraction')
     parser.add_argument('--test_frac', type=float, default=0.2, help='The test fraction')

@@ -7,11 +7,14 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import matplotlib.ticker as tkr
 
 from multiprocessing import freeze_support
 
 # Import DANRA dataset class from data_modules.py in src folder
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
+from utils import *
 
 
 def launch_test_dataset_from_args():
@@ -19,23 +22,23 @@ def launch_test_dataset_from_args():
         Launch the test dataset from the command line arguments
     '''
     parser = argparse.ArgumentParser(description='Test the dataset')
-    parser.add_argument('--var', type=str, default='temp', help='The variable to use')
+    parser.add_argument('--var', type=str, default='prcp', help='The variable to use')
     parser.add_argument('--img_dim', type=int, default=128, help='The image dimension')
-    parser.add_argument('--sample_w_lsm_topo', type=bool, default=True, help='Whether to sample with lsm and topo')
-    parser.add_argument('--sample_w_cutouts', type=bool, default=True, help='Whether to sample with cutouts')
-    parser.add_argument('--sample_w_cond_img', type=bool, default=True, help='Whether to sample with conditional images')
-    parser.add_argument('--sample_w_cond_season', type=bool, default=True, help='Whether to sample with conditional seasons')
-    parser.add_argument('--sample_w_sdf', type=bool, default=True, help='Whether to sample with sdf')
-    parser.add_argument('--scaling', type=bool, default=True, help='Whether to scale the data')
+    parser.add_argument('--sample_w_lsm_topo', type=str2bool, default=True, help='Whether to sample with lsm and topo')
+    parser.add_argument('--sample_w_cutouts', type=str2bool, default=True, help='Whether to sample with cutouts')
+    parser.add_argument('--sample_w_cond_img', type=str2bool, default=True, help='Whether to sample with conditional images')
+    parser.add_argument('--sample_w_cond_season', type=str2bool, default=True, help='Whether to sample with conditional seasons')
+    parser.add_argument('--sample_w_sdf', type=str2bool, default=True, help='Whether to sample with sdf')
+    parser.add_argument('--scaling', type=str2bool, default=False, help='Whether to scale the data')
     parser.add_argument('--scale_mean', type=float, default=8.69251, help='Mean of OG data distribution (Temperature [C])')
     parser.add_argument('--scale_std', type=float, default=6.192434, help='STD of OG data distribution (Temperature [C])')
     parser.add_argument('--scale_min', type=float, default=0, help='Minimum of OG data distribution (Precipitation [mm])')
     parser.add_argument('--scale_max', type=float, default=160, help='Maximum of OG data distribution (Precipitation [mm])')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
-    parser.add_argument('--save_figs', type=bool, default=False, help='Whether to save the figures')
-    parser.add_argument('--show_figs', type=bool, default=True, help='Whether to show the figures')
+    parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
+    parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--path_save', type=str, default='/Users/au728490/Documents/PhD_AU/PhD_AU_material/Figures/', help='The path to save the figures')
-    parser.add_argument('--cutout_domains', type=list, default=[170, 170+180, 340, 340+180], help='The cutout domains')
+    parser.add_argument('--cutout_domains', type=str2list, default=[170, 170+180, 340, 340+180], help='The cutout domains')
     parser.add_argument('--topo_min', type=int, default=-12, help='The minimum value of the topological data')
     parser.add_argument('--topo_max', type=int, default=330, help='The maximum value of the topological data')
     parser.add_argument('--norm_min', type=int, default=0, help='The minimum value of the normalized topological data')
@@ -47,6 +50,8 @@ def launch_test_dataset_from_args():
 
     args = parser.parse_args()
 
+
+    print(f'Scaling argument: {args.scaling}')
     test_dataset(args)
 
 
@@ -86,8 +91,7 @@ def test_dataset(args):
 
     # Set scaling to true or false
     scaling = args.scaling
-
-
+    
     # Set paths to zarr data
     data_dir_danra_zarr = args.path_data + 'data_DANRA/size_589x789/' + var + '_589x789/zarr_files/test.zarr'
     data_dir_era5_zarr = args.path_data + 'data_ERA5/size_589x789/' + var + '_589x789/zarr_files/test.zarr'
@@ -128,6 +132,14 @@ def test_dataset(args):
         data_lsm = None
         data_topo = None
     
+    if scaling:
+        print(f'\nScaling data')
+        if var == 'temp':
+            print(f'\tMean: {args.scale_mean}, std: {args.scale_std}')
+        elif var == 'prcp':
+            print(f'\tMin: {args.scale_min}, max: {args.scale_max}\n')
+
+
     # Initialize dataset with all options
     dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_danra_zarr, 
                                     image_size, 
@@ -186,6 +198,13 @@ def test_dataset(args):
 
     if args.show_figs:
         fig, axs = plt.subplots(n_samples, n_subplots, figsize=(2*n_subplots, 2*n_samples))
+        if scaling:
+            if var == 'temp':
+                fig.suptitle(f'Dataset with scaling, mean: {args.scale_mean}, std: {args.scale_std}')
+            elif var == 'prcp':
+                fig.suptitle(f'Dataset with scaling, min: {args.scale_min}, max: {args.scale_max}')
+        else:
+            fig.suptitle(f'Dataset without scaling')
 
     print('\n\nDataset with options:\n')
     for i, idx in enumerate(idxs):
@@ -205,7 +224,22 @@ def test_dataset(args):
                 axs[i,j].invert_yaxis()
                 axs[i,j].set_xticks([])
                 axs[i,j].set_yticks([])
-                fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j])
+                # fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j])
+                # Put truth and condition images in same colorbar
+                
+
+                if j == 0 or j == 1:
+                    if scaling:
+                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.4f'))
+                    else:
+                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+
+                else:
+                    if scaling:
+                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.2f'))
+                    else:
+                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+
                 if i == 0:
                     axs[i,j].set_title(img_str)
                     print(img_str)

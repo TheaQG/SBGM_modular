@@ -1,25 +1,5 @@
 '''
     Utility functions for the project.
-
-    Functions:
-    ----------
-    - model_summary: Print the model summary
-    - SimpleLoss: Simple loss function
-    - HybridLoss: Hybrid loss function
-    - SDFWeightedMSELoss: Custom loss function for SDFs
-    - convert_npz_to_zarr: Convert DANRA .npz files to zarr files
-    - create_concatenated_data_files: Create concatenated data files
-    - convert_npz_to_zarr_based_on_time_split: Convert DANRA .npz files to zarr files based on a time split
-    - convert_npz_to_zarr_based_on_percent_split: Convert DANRA .npz files to zarr files based on a percentage split
-    - convert_nc_to_zarr: Convert ERA5 .nc files to zarr files
-    - extract_samples: Extract samples from dictionary
-    
-    For argparse:
-    - str2bool: Convert string to boolean
-    - str2list: Convert string to list
-    - str2list_of_strings: Convert string to list of strings
-    - str2dict: Convert string to dictionary
-
 '''
 
 import argparse

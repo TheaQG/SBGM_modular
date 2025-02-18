@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
 from scipy.stats import boxcox, yeojohnson
 from scipy.optimize import minimize_scalar
-
+from utils import *
 
 def data_stats_from_args():
 
@@ -23,9 +23,9 @@ def data_stats_from_args():
     parser.add_argument('--data_type', type=str, default='ERA5', help='The dataset to compute statistics for (DANRA or ERA5)')
     parser.add_argument('--split_type', type=str, default='train', help='The split type of the data (train, val, test)')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
-    parser.add_argument('--create_figs', type=bool, default=True, help='Whether to create figures')
-    parser.add_argument('--save_figs', type=bool, default=False, help='Whether to save the figures')
-    parser.add_argument('--show_figs', type=bool, default=True, help='Whether to show the figures')
+    parser.add_argument('--create_figs', type=str2bool, default=True, help='Whether to create figures')
+    parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
+    parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--fig_path', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to save the figures')
     
     args = parser.parse_args()

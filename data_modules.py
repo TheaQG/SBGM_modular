@@ -6,6 +6,7 @@
 """
 
 # Import libraries and modules 
+from special_transforms import *
 import zarr
 import random, torch
 import numpy as np
@@ -151,95 +152,6 @@ class DateFromFile:
     
 
 
-# Define custom transform
-class Scale(object):
-    '''
-        Class for scaling the data to a new interval. 
-        The data is scaled to the interval [in_low, in_high].
-        The data is assumed to be in the interval [data_min_in, data_max_in].
-    '''
-    def __init__(self,
-                 data_min_in, # For ERA5 prcp: 0
-                 data_max_in, # For ERA5 prcp: 0.160
-                 in_low = 0,
-                 in_high = 1
-                 ):
-        '''
-            Initialize the class.
-            Input:
-                - in_low: lower bound of new interval
-                - in_high: upper bound of new interval
-                - data_min_in: lower bound of data interval
-                - data_max_in: upper bound of data interval
-        '''
-        self.in_low = in_low
-        self.in_high = in_high
-        self.data_min_in = data_min_in 
-        self.data_max_in = data_max_in
-
-    def __call__(self, sample):
-        '''
-            Call function for the class - scales the data to the new interval.
-            Input:
-                - sample: datasample to scale to new interval
-        '''
-        data = sample
-        OldRange = (self.data_max_in - self.data_min_in)
-        NewRange = (self.in_high - self.in_low)
-
-        # Generating the new data based on the given intervals
-        DataNew = (((data - self.data_min_in) * NewRange) / OldRange) + self.in_low
-
-        return DataNew
-import torch
-
-class ZScoreTransform(object):
-    '''
-    Class for Z-score standardizing the data. 
-    The data is standardized to have a mean of 0 and a standard deviation of 1.
-    The mean and standard deviation of the training data should be provided.
-    '''
-    def __init__(self,
-                 mean,
-                 std
-                 ):
-        '''
-        Initialize the class.
-        Input:
-            - mean: the mean of the training data
-            - std: the standard deviation of the training data
-        '''
-        self.mean = mean
-        self.std = std
-
-    def __call__(self, sample):
-        '''
-        Call function for the class - standardizes the data.
-        Input:
-            - sample: data sample to be standardized
-        '''
-        if not isinstance(sample, torch.Tensor):
-            sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
-        
-        # Ensure mean and std are tensors for broadcasting, preserve their shapes if they are not scalars.
-        if not isinstance(self.mean, torch.Tensor):
-            self.mean = torch.tensor(self.mean, dtype=torch.float32)
-        if not isinstance(self.std, torch.Tensor):
-            self.std = torch.tensor(self.std, dtype=torch.float32)
-
-        # Expand as necessary to match the sample dimensions
-        if len(sample.shape) > len(self.mean.shape):
-            shape_diff = len(sample.shape) - len(self.mean.shape)
-            for _ in range(shape_diff):
-                self.mean = self.mean.unsqueeze(0)
-                self.std = self.std.unsqueeze(0)
-
-        # Standardizing the sample
-        standardized_sample = (sample - self.mean) / (self.std + 1e-8)  # Add a small epsilon to avoid division by zero
-
-        return standardized_sample
-
-
 def find_rand_points(rect, crop_dim):
     '''
     Function to find random quadrants in a given rectangle
@@ -290,17 +202,15 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 cutout_domains:list = None,         # Domains to use for cutouts
                 n_samples_w_cutouts:int = None,     # Number of samples to load with cutouts (can be greater than n_samples)
                 lsm_full_domain = None,             # Land-sea mask of full domain
-                lsm_weight = 0.1,                   # Weighting of lsm input
                 topo_full_domain = None,            # Topography of full domain
-                topo_weight = 0.1,                  # Weighting of topography input
                 sdf_weighted_loss:bool = False,     # Whether to use weighted loss for SDF
                 scale:bool = True,                  # Whether to scale data to new interval
-                scale_mean:float = 8.69251,         # Mean of data for scaling (in Celsius) - in temperature data
-                scale_std:float = 6.192434,         # Standard deviation of data for scaling (in Celsius) - in temperature data
+                scale_mean:float = 8.69251,           # Mean of data for scaling
+                scale_std:float = 6.192434,            # Standard deviation of data for scaling
                 scale_min:float = 0,                # Minimum value of data for scaling (in mm) - in precipitation data
                 scale_max:float = 160,              # Maximum value of data for scaling (in mm) - in precipitation data
-                conditional_seasons:bool = False,   # Whether to use seasonal conditional sampling
-                conditional_images:bool = False,    # Whether to use image conditional sampling
+                conditional_seasons:bool = False,    # Whether to use seasonal conditional sampling
+                conditional_images:bool = False,     # Whether to use image conditional sampling
                 cond_dir_zarr:str = None,           # Path to directory containing conditional data
                 n_classes:int = None                # Number of classes for conditional sampling
                 ):                       
@@ -312,7 +222,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         self.data_size = data_size
         self.cache_size = cache_size
         self.variable = variable
-
+        
         self.scale = scale
         self.scale_mean = scale_mean
         self.scale_std = scale_std
@@ -328,17 +238,15 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             self.n_samples_w_cutouts = n_samples_w_cutouts
         
         self.lsm_full_domain = lsm_full_domain
-        self.lsm_weight = lsm_weight
         self.topo_full_domain = topo_full_domain
-        self.topo_weight = topo_weight
         self.sdf_weighted_loss = sdf_weighted_loss
-
+        
         self.conditional_seasons = conditional_seasons
         self.conditional_images = conditional_images
         self.cond_dir_zarr = cond_dir_zarr
         #self.zarr_group_cond = zarr_group_cond
         self.n_classes = n_classes
-        
+
         if self.variable == 'prcp':
             print('DANRA data in [mm], ERA5 data in [m]')
             print('Converting ERA5 data to [mm] by multiplying by 1000\n')
@@ -442,20 +350,22 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 transforms.ToTensor(),
                 transforms.Resize(self.data_size, antialias=True)
                 ])
-            
-            if variable == 'temp':
+            if self.variable == 'temp':
                 self.transforms = transforms.Compose([
                     transforms.ToTensor(),
                     transforms.Resize(self.data_size, antialias=True),
                     # Use if z-score transform (transformed to 10 year ERA5 (mean=8.714, std=6.010) training data):
                     ZScoreTransform(self.scale_mean, self.scale_std)
+                    # Use if scaling in interval (not z-score transform):
                     ])
-            elif variable == 'prcp':
+            elif self.variable == 'prcp':
                 self.transforms = transforms.Compose([
                     transforms.ToTensor(),
                     transforms.Resize(self.data_size, antialias=True),
-                    # Use Scale transform to scale data to new interval (based on ERA5 training data, (min = 0, max = 0.160m)):
-                    Scale(self.scale_min, scale_max, 0, 1)
+                    # Use log transform for precipitation data:
+                    PrcpLogTransform(),
+                    # # Use Scale transform to scale data to new interval (based on ERA5 training data, (min = 0, max = 0.160m)):
+                    # Scale(0, 0.160, 0, 1)
                     ])
         else:
             self.transforms = transforms.Compose([
@@ -561,8 +471,10 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
 
         elif self.variable == 'prcp':
             try:
-                img = self.zarr_group_img[file_name]['tp'][()][0,0,:,:]
+                # DANRA in [mm]
+                img = self.zarr_group_img[file_name]['tp'][()][0,0,:,:] 
             except:
+                # DANRA in [mm]
                 img = self.zarr_group_img[file_name]['data'][()][:,:]
             if self.conditional_images:
                 if self.cond_dir_zarr is None:
@@ -571,7 +483,9 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                     # Create conditional image with mean value
                     img_cond = np.ones(img.shape)*mu
                 else:
+                    # ERA5 in [m] - convert to [mm] by multiplying by 1000
                     img_cond = self.zarr_group_cond[file_name_cond]['arr_0'][()][:,:] * 1000
+
 
         if self.cutouts:
             # Get random point
@@ -622,7 +536,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             # Return sample image as dict
             sample_dict = {'img':img}
             sample = (img)
-
+        
         # Add item to cache
         self._addToCache(idx, sample_dict)
 
@@ -633,10 +547,10 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             if self.sdf_weighted_loss:
                 # Make sure lsm and topo also provided, otherwise raise error
                 if self.lsm_full_domain is not None and self.topo_full_domain is not None:
-                    # Add lsm, sdf, topo and point to dict (multiply by weight)
-                    sample_dict['lsm'] = lsm_use * self.lsm_weight
+                    # Add lsm, sdf, topo and point to dict
+                    sample_dict['lsm'] = lsm_use
                     sample_dict['sdf'] = sdf_use
-                    sample_dict['topo'] = topo_use * self.topo_weight
+                    sample_dict['topo'] = topo_use
                     sample_dict['points'] = point
                     # Return sample image and classifier and random point for cropping (lsm and topo)
                     return sample_dict #sample, lsm_use, topo_use, sdf_use, point
@@ -647,8 +561,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 # Return lsm and topo if provided
                 if self.lsm_full_domain is not None and self.topo_full_domain is not None:
                     # Add lsm, topo and point to dict
-                    sample_dict['lsm'] = lsm_use * self.lsm_weight
-                    sample_dict['topo'] = topo_use * self.topo_weight
+                    sample_dict['lsm'] = lsm_use
+                    sample_dict['topo'] = topo_use
                     sample_dict['points'] = point
                     # Return sample image and classifier and random point for cropping (lsm and topo)
                     return sample_dict #sample, lsm_use, topo_use, point

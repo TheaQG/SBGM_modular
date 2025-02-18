@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 
 # Import objects from other files in this repository
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
+from special_transforms import *
 from score_unet import *
 from score_sampling import *
 from training import *
@@ -523,6 +524,7 @@ def main_sbgm(args):
                     # Add generated samples to data_plot and data_names
                     data_plot.append(generated_samples)
                     data_names.append('Generated')
+                    
 
                     # Plotting truth, condition, generated, lsm and topo for n different test images
                     fig, axs = plt.subplots(n_axs+1, n_gen_samples, figsize=(14,9)) 
