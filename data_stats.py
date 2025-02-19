@@ -9,9 +9,40 @@ import os
 import zarr
 import argparse
 import datetime
+
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import *
+import matplotlib
+matplotlib.use('TkAgg') # For MacOS
+# Set font params
+plt.rcParams.update({'font.size': 11})
+plt.rcParams.update({'font.family': 'serif'})
+plt.rcParams.update({'mathtext.default': 'regular'})
+plt.rcParams.update({'axes.linewidth': 0.5})
+plt.rcParams.update({'xtick.major.width': 0.5})
+plt.rcParams.update({'ytick.major.width': 0.5})
+plt.rcParams.update({'xtick.minor.width': 0.5})
+plt.rcParams.update({'ytick.minor.width': 0.5})
+plt.rcParams.update({'xtick.major.size': 2})
+plt.rcParams.update({'ytick.major.size': 2})
+plt.rcParams.update({'xtick.minor.size': 1})
+plt.rcParams.update({'ytick.minor.size': 1})
+plt.rcParams.update({'axes.labelsize': 11})
+plt.rcParams.update({'legend.fontsize': 11})
+plt.rcParams.update({'legend.frameon': False})
+plt.rcParams.update({'legend.loc': 'upper right'})
+plt.rcParams.update({'legend.handlelength': 1.5})
+plt.rcParams.update({'legend.handletextpad': 1.0})
+plt.rcParams.update({'legend.labelspacing': 0.4})
+plt.rcParams.update({'legend.columnspacing': 1.0})
+plt.rcParams.update({'lines.linewidth': 1.0})
+plt.rcParams.update({'lines.markersize': 4})
+plt.rcParams.update({'figure.dpi': 100})
+plt.rcParams.update({'savefig.dpi': 300})
+plt.rcParams.update({'savefig.bbox': 'tight'})
+
+# matplotlib.use('Agg') # For Linux
+from utils import str2bool
 
 def data_stats_from_args():
     '''
@@ -23,14 +54,15 @@ def data_stats_from_args():
     parser.add_argument('--split_type', type=str, default='test', help='The split type of the data (train, val, test)')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--create_figs', type=str2bool, default=True, help='Whether to create figures')
-    parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
+    parser.add_argument('--save_figs', type=str2bool, default=True, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--save_stats', type=str2bool, default=False, help='Whether to save the statistics')
-    parser.add_argument('--fig_path', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_figures/', help='The path to save the figures')
-    parser.add_argument('--stats_path', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_statistics', help='The path to save the statistics')
+    parser.add_argument('--fig_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_figures/', help='The path to save the figures')
+    parser.add_argument('--stats_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_statistics', help='The path to save the statistics')
     parser.add_argument('--transformations', nargs='+', default=None, help='List of transformations to apply to the data', choices=['zscore', 'log', 'log01'])
     parser.add_argument('--show_only_transformed', type=str2bool, default=False, help='Whether to show only the transformed data')
     parser.add_argument('--time_agg', type=str, default='daily', choices=['daily', 'weekly', 'monthly'], help='Time aggregation for statistics (daily, weekly, monthly, yearly)')
+    parser.add_argument('--n_workers', type=int, default=1, help='Number of workers to use for CPU multiprocessing')
     
     args = parser.parse_args()
 
@@ -70,7 +102,8 @@ class DataStats:
                 stats_path='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/',
                 transformations=None,
                 show_only_transformed=False,
-                time_agg='daily'):
+                time_agg='daily',
+                n_workers=1):
 
         self.var = var                  # The variable to compute statistics for (for now, prcp and temp)
         self.data_type = data_type      # The dataset to compute statistics for (DANRA or ERA5)
@@ -85,14 +118,19 @@ class DataStats:
         self.transformations = transformations if transformations else [] # List of transformations to apply to the data
         self.show_only_transformed = show_only_transformed # Whether to show only the transformed data
         self.time_agg = time_agg        # Time aggregation for statistics (daily, weekly, monthly, yearly)
+        self.n_workers = n_workers      # How many CPU processes to spawn for multiprocessing
+
+
 
         # Set some plot and variable specific parameters
         if self.var == 'temp':
             self.var_str = 't'
             self.cmap = 'plasma'
+            self.var_label = 'Temperature [C]'
         elif self.var == 'prcp':
             self.var_str = 'tp'
             self.cmap = 'inferno'
+            self.var_label = 'Precipitation [mm]'
             # IMPLEMENT MORE VARIABLES HERE
 
         # Set some naming parameters
@@ -127,23 +165,75 @@ class DataStats:
         except ValueError:
             return None
 
-    def load_data(self,
-                    plot_cutout=True,
-                    ):
+    def _process_single_file(self, zarr_group_img, file):
         '''
-            Loads data from zarr, computes daily statistics and optionally plots and returns them.
-            Minimizes storing full data in memory by default.
+            Method called by each CPU worker to process a single file.
+            1) Reads data from zarr
+            2) Cuts out a specific region
+            3) Basic variable correction
+            4) Computes statistics
+            returns: (stats_dict_for_this_file, data_array)
         '''
-        # Set the specific path to data and load the data from the zarr files
-        PATH_DATA = self.path_data + 'data_' + self.data_type + '/size_' + self.danra_size_str + '/' + self.var + '_' + self.danra_size_str +  '/zarr_files/'
-        data_dir_zarr = PATH_DATA + self.split_type + '.zarr'
+        # Print progress
 
-        print(f'\nOpening zarr group: {data_dir_zarr}')
+        # Try read
+        try:
+            data = zarr_group_img[file][self.var_str][:].squeeze()
+        except KeyError:
+            data = None
+            for fallback_key in ['arr_0', 'data']:
+                if fallback_key in zarr_group_img[file]:
+                    data = zarr_group_img[file][fallback_key][:].squeeze()
+                    break
+            if data is None:
+                # Could not read data
+                return None
+        
+        # Cutout
+        data = data[self.cutout[0]:self.cutout[1], self.cutout[2]:self.cutout[3]]
+        
+        # Adjust for var
+        if self.var == 'temp':
+            data = data - 273.15
+        elif self.var == 'prcp':
+            data[data <= 0] = 1e-4
+        
+        # Compute stats
+        mean, median, std_dev, variance, min_val, max_val, _ = self.compute_statistics(data)
+        date_obj = self.parse_file_date(file)
+        # Build a single-file stats dict
+        single_stats = {
+            "file": file,
+            "date": date_obj if date_obj else file,
+            "mean": mean,
+            "median": median,
+            "std_dev": std_dev,
+            "variance": variance,
+            "min": min_val,
+            "max": max_val,
+        }
+        return (single_stats, data)
+
+    def load_data(self, plot_cutout=True):
+        '''
+            Method to load the data from the zarr files and compute statistics.
+            Optionally plot the cutout for the first file.
+            If n_workers > 1, parallelize the CPU processing of the files.
+        '''
+        path_data = os.path.join(
+            self.path_data,
+            f"data_{self.data_type}",
+            f"size_{self.danra_size_str}",
+            f"{self.var}_{self.danra_size_str}",
+            "zarr_files"
+        )
+        data_dir_zarr = os.path.join(path_data, f"{self.split_type}.zarr")
+        print(f"\nOpening zarr group: {data_dir_zarr}\n")
         zarr_group_img = zarr.open_group(data_dir_zarr, mode='r')
         files = list(zarr_group_img.keys())
-        files.sort() # Ensure sorted by date
-        
-        # Prepare dict to store stats.
+        files.sort()
+
+        # Prepare final stats_dict
         stats_dict = {
             "date": [],
             "mean": [],
@@ -152,93 +242,118 @@ class DataStats:
             "variance": [],
             "min": [],
             "max": [],
-        } 
-
-
-        # Create a dir to store figures
-        if self.save_figs and not os.path.exists(self.fig_path):
-            os.makedirs(self.fig_path)
-
-        # Make a list to store all the data and a df to store the statistics. Might become huge.
+        }
         all_data_list = []
 
-        # Loop through all files and process the data
-        for idx, file in enumerate(files):
-            if idx % 10 == 0:
-                print(f'\n\nProcessing File {idx+1}/{len(files)}: {file}')
-            try:
-                data = zarr_group_img[file][self.var_str][:].squeeze()
-            except KeyError:
-                for fallback_key in ['arr_0', 'data']:
-                    if fallback_key in zarr_group_img[file]:
-                        data = zarr_group_img[file][fallback_key][:].squeeze()
-                        break
-                    else:
-                        print(f'Error reading data from {file}. Skipping.')
+        # Prepare figure and stats paths
+        if not os.path.exists(self.fig_path):
+            os.makedirs(self.fig_path, exist_ok=True)
+        if not os.path.exists(self.stats_path):
+            os.makedirs(self.stats_path, exist_ok=True)
+
+        # (1) If user wants to parallelize, create a Pool, using imap to show progress
+        if self.n_workers > 1:
+            import multiprocessing
+            from functools import partial
+
+            worker_fn = partial(self._process_single_file, zarr_group_img)
+            with multiprocessing.Pool(self.n_workers) as pool:
+                # imap returns results in the order of fields, but yields them as they finish
+                results_iter = pool.imap(worker_fn, files)
+
+                # Loop over results
+                for idx, out in enumerate(results_iter):
+                    if out is None:
                         continue
+                    single_stats, data = out
 
-            # Cutout specific region                        
-            data = data[self.cutout[0]:self.cutout[1], self.cutout[2]:self.cutout[3]]
-            
-            # Convert to Celsius if temperature, set zeros to small value if precipitation
-            if self.var == 'temp':
-                data = data - 273.15
-            if self.var == 'prcp':
-                data[data <= 0] = 1e-4
-                # IMPLEMENT MORE VARIABLES HERE
-                
-            all_data_list.append(data)
-            # Compute statistics for single file data
-            mean, median, std_dev, variance, min_temp, max_temp, percentiles = self.compute_statistics(data)
+                    # Store daily stats
+                    stats_dict["date"].append(single_stats["date"])
+                    stats_dict["mean"].append(single_stats["mean"])
+                    stats_dict["median"].append(single_stats["median"])
+                    stats_dict["std_dev"].append(single_stats["std_dev"])
+                    stats_dict["variance"].append(single_stats["variance"])
+                    stats_dict["min"].append(single_stats["min"])
+                    stats_dict["max"].append(single_stats["max"])
 
-            # Parse date from last 8 characters of filename (if None, just storing filename)
-            date_obj = self.parse_file_date(file)
-            stats_dict["date"].append(date_obj if date_obj else file)
-            stats_dict["mean"].append(mean)
-            stats_dict["median"].append(median)
-            stats_dict["std_dev"].append(std_dev)
-            stats_dict["variance"].append(variance)
-            stats_dict["min"].append(min_temp)
-            stats_dict["max"].append(max_temp)
+                    # Save data if we want global distribution
+                    all_data_list.append(data)
 
-            # Save a figure of the first cutout, if specified
-            if idx == 0 and plot_cutout:
-                fig, ax = plt.subplots(1, 1, figsize=(5, 5), layout='tight')
-                im = ax.imshow(data, cmap=self.cmap)
-                cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.set_title(f"First cutout of {self.data_type} {self.var} data\nFile: {file}")
-                ax.invert_yaxis()
-                if self.save_figs:
-                    fig.savefig(self.fig_path + f'{self.var}_{self.split_type}_{self.data_type}_cutout_example.png', dpi=300, bbox_inches='tight')
-                if self.show_figs:
-                    # Show for 5 seconds
-                    plt.show(block=False)
-                    plt.pause(5)
-                    plt.close(fig)
+                    # Print progress every 100 files
+                    if idx % 100 == 0:
+                        print(f"Processed {idx+1}/{len(files)} files...", flush=True)
 
-                else:
-                    plt.close(fig)
+                    # Optionally plot cutout for the first file
+                    if idx == 0 and plot_cutout:
+                        self._plot_cutout(data, single_stats["file"])
+                        
+        else:
+            # Single process
+            for idx, file in enumerate(files):
+                out = self._process_single_file(zarr_group_img, file)
+                if out is None:
+                    continue
+                single_stats, data = out
 
+                # Store daily stats
+                stats_dict["date"].append(single_stats["date"])
+                stats_dict["mean"].append(single_stats["mean"])
+                stats_dict["median"].append(single_stats["median"])
+                stats_dict["std_dev"].append(single_stats["std_dev"])
+                stats_dict["variance"].append(single_stats["variance"])
+                stats_dict["min"].append(single_stats["min"])
+                stats_dict["max"].append(single_stats["max"])
 
-        # Convert lists to arrays for convenience
-        for k in stats_dict:
-            stats_dict[k] = np.array(stats_dict[k], dtype=object if k == "date" else float)
+                # Save data if we want global distribution
+                all_data_list.append(data)
 
-        # Optionally save the statistics to a csv file
+                # Print progress every 100 files
+                if idx % 100 == 0:
+                    print(f"Processed {idx+1}/{len(files)} files...", flush=True)
+
+                # Optionally plot cutout for the first file 
+                if idx == 0 and plot_cutout:
+                    self._plot_cutout(data, single_stats["file"])
+
+        # Convert lists to arrays
+        for k in ["mean","median","std_dev","variance","min","max"]:
+            stats_dict[k] = np.array(stats_dict[k], dtype=float)
+        
+        # Optionally save stats
         if self.save_stats:
             if not os.path.exists(self.stats_path):
                 os.makedirs(self.stats_path)
-            csv_path = os.path.join(self.stats_path, f'{self.var}_{self.split_type}_{self.data_type}_stats.csv')
-            # Save the statistics to a csv file WITHOUT pandas
-            with open(csv_path, 'w') as f:
-                f.write('file,mean,median,std_dev,variance,min,max\n')
-                for i in range(len(files)):
-                    f.write(f'{stats_dict["date"][i]},{stats_dict["mean"][i]},{stats_dict["median"][i]},{stats_dict["std_dev"][i]},{stats_dict["variance"][i]},{stats_dict["min"][i]},{stats_dict["max"][i]}\n')
-
+            out_csv = os.path.join(self.stats_path, f"{self.var}_{self.split_type}_{self.data_type}_stats.csv")
+            with open(out_csv, 'w') as f:
+                f.write("date,mean,median,std_dev,variance,min,max\n")
+                for i in range(len(stats_dict["date"])):
+                    d_str = stats_dict["date"][i]
+                    f.write(f"{d_str},{stats_dict['mean'][i]},"
+                            f"{stats_dict['median'][i]},{stats_dict['std_dev'][i]},"
+                            f"{stats_dict['variance'][i]},{stats_dict['min'][i]},"
+                            f"{stats_dict['max'][i]}\n")
 
         return all_data_list, stats_dict
+    
+    def _plot_cutout(self, data, file_label):
+        """
+            Helper to avoid duplicating the cutout plotting code.
+        """
+        fig, ax = plt.subplots(1,1, figsize=(5,5))
+        im = ax.imshow(data, cmap=self.cmap)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=self.var_label)
+        ax.set_title(f"First cutout, {self.data_type} {self.var.capitalize()} {self.split_type}: {file_label}")
+        ax.invert_yaxis()
+        if self.save_figs:
+            out_path = os.path.join(self.fig_path, f'{self.var}_{self.split_type}_{self.data_type}_cutout.png')
+            fig.savefig(out_path, dpi=300, bbox_inches='tight')
+
+        if self.show_figs:
+            plt.show(block=False)
+            plt.pause(2)
+            plt.close(fig)
+        else:
+            plt.close(fig)
 
     def apply_transformations(self,
                                 data_1d):
@@ -384,9 +499,10 @@ class DataStats:
             ax[2].set_xlabel(f'Time ({self.time_agg.capitalize()})')
             ax[2].legend()
 
-            # Use the date labels
-            ax[2].set_xticks(x_vals)
-            ax[2].set_xticklabels(agg_stats_dict["date"], rotation=45, ha='right')
+            # Use the date labels, but only show every 5th
+            x_ticks = agg_stats_dict["date"]
+            ax[2].set_xticks(x_vals[::5])
+            ax[2].set_xticklabels(x_ticks[::5], rotation=45, ha='right')
 
             fig.tight_layout()
 
@@ -402,7 +518,7 @@ class DataStats:
                 plt.close(fig)
 
 
-        # 3) Global Distribution histograms
+        # 3) Global Distribution histograms (values)
         # For histograms of entire dataset, we need all in memory
         all_data_flat = np.concatenate(all_data_list, axis=0).flatten()
         if self.create_figs:
@@ -422,7 +538,7 @@ class DataStats:
                 label_t = f'{key.capitalize()} Transformed, mu={mu_t:.2f}, std={std_t:.2f}'
                 ax.hist(arr, bins=100, alpha=0.7, label=label_t)
 
-            ax.set_title(f"Global Distrbution - {self.data_type} {self.var.capitalize()}, {self.split_type}")
+            ax.set_title(f"Global Distribution - {self.data_type} {self.var.capitalize()}, {self.split_type}")
             if self.var == 'temp':
                 ax.set_xlabel('Temperature [C]')
             elif self.var == 'prcp':
@@ -438,13 +554,43 @@ class DataStats:
                 out_path = os.path.join(self.fig_path, f'{self.var}_{self.split_type}_{self.data_type}_all_data.png')
                 fig.savefig(out_path, dpi=300, bbox_inches='tight')
             if self.show_figs:
-                plt.show()
                 # Show for 5 seconds
-                # plt.show(block=False)
-                # plt.pause(5)
-                # plt.close(fig)
+                plt.show(block=False)
+                plt.pause(5)
+                plt.close(fig)
             else:
                 plt.close(fig)
+
+
+        # 4) Global Distribution histograms (daily stats, mean, std_dev, etc.)
+        # For histograms of entire dataset, we need all in memory
+        if self.create_figs:
+            n_plots = len(agg_stats_dict.keys()) - 1
+            print(f"Plotting {n_plots} histograms for daily stats...")
+            fig, ax = plt.subplots(2, n_plots//2, figsize=(12, 8))
+            fig.suptitle(f'{self.data_type} {self.var.capitalize()} {self.split_type} Daily Stats Distribution', fontsize=14)
+            axes = ax.flatten()
+            for i, k in enumerate(agg_stats_dict.keys()):
+                if k == 'date':
+                    continue
+                axes[i-1].hist(agg_stats_dict[k], bins=100, alpha=0.7)
+                axes[i-1].set_title(f'{k.capitalize()} Distribution')
+                axes[i-1].set_xlabel(k.capitalize())
+                axes[i-1].set_ylabel('Frequency')
+
+            fig.tight_layout()
+
+            if self.save_figs:
+                out_path = os.path.join(self.fig_path, f'{self.var}_{self.split_type}_{self.data_type}_daily_stats.png')
+                fig.savefig(out_path, dpi=300, bbox_inches='tight')
+            if self.show_figs:
+                plt.show(block=False)
+                plt.pause(5)
+                plt.close(fig)
+            else:
+                plt.close(fig)
+
+
 
     def run(self):
         '''
