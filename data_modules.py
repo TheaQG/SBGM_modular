@@ -14,6 +14,7 @@ import multiprocessing
 from torch.utils.data import Dataset
 from torchvision import transforms
 from scipy.ndimage import distance_transform_edt as distance
+from special_transforms import PrcpLogTransform, ZScoreTransform
 
 def preprocess_lsm_topography(lsm_path, topo_path, target_size, scale=False, flip=False):
     '''
@@ -209,6 +210,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 scale_std:float = 6.192434,            # Standard deviation of data for scaling
                 scale_min:float = 0,                # Minimum value of data for scaling (in mm) - in precipitation data
                 scale_max:float = 160,              # Maximum value of data for scaling (in mm) - in precipitation data
+                buffer:float = 0.5,                 # Percentage buffer for scaling
                 conditional_seasons:bool = False,    # Whether to use seasonal conditional sampling
                 conditional_images:bool = False,     # Whether to use image conditional sampling
                 cond_dir_zarr:str = None,           # Path to directory containing conditional data
@@ -228,6 +230,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         self.scale_std = scale_std
         self.scale_min = scale_min
         self.scale_max = scale_max
+        self.buffer = buffer
         
         self.shuffle = shuffle
         self.cutouts = cutouts
@@ -251,8 +254,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             print('DANRA data in [mm], ERA5 data in [m]')
             print('Converting ERA5 data to [mm] by multiplying by 1000\n')
             if self.scale:
-                print('Using Scale transform to scale data to new interval')
-                print(f'New interval: [{self.scale_min}, {self.scale_max}]\n\n')
+                print('Using PrcpLogTransform to scale data to new interval')
+                print(f'New interval: [{self.scale_min}, {self.scale_max}] with buffer={self.buffer}\n\n')
         elif self.variable == 'temp':
             print('DANRA and  ERA5 data in [Kelvin]')
             print('Converting data to [Celsius] by subtracting 273.15\n')
@@ -363,7 +366,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                     transforms.ToTensor(),
                     transforms.Resize(self.data_size, antialias=True),
                     # Use log transform for precipitation data:
-                    PrcpLogTransform(),
+                    PrcpLogTransform(eps=1e-8, scale01=True, glob_max=self.scale_max, buffer=self.buffer)
                     # # Use Scale transform to scale data to new interval (based on ERA5 training data, (min = 0, max = 0.160m)):
                     # Scale(0, 0.160, 0, 1)
                     ])

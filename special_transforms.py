@@ -93,8 +93,8 @@ class ZScoreTransform(object):
         '''
         Initialize the class.
         Input:
-            - mean: the mean of the training data
-            - std: the standard deviation of the training data
+            - mean: the mean of the global training data
+            - std: the standard deviation of the global training data
         '''
         self.mean = mean
         self.std = std
@@ -178,13 +178,19 @@ class PrcpLogTransform(object):
     Class for log-transforming the precipitation data.
     The data is transformed by taking the logarithm of the data.
     '''
-    def __init__(self): 
+    def __init__(self, eps=1e-8, scale01 = True,
+                 glob_max=None, buffer=0.5): 
         '''
         Initialize the class.
         '''
+        self.eps = eps
+        self.scale01 = scale01
+        self.glob_max = glob_max
+        self.buffer = buffer
+
         pass
 
-    def __call__(self, sample, eps=1e-8):
+    def __call__(self, sample):
         '''
         Call function for the class - log-transforms the data.
         Input:
@@ -200,7 +206,14 @@ class PrcpLogTransform(object):
         
 
         # Log-transform the sample
-        log_sample = torch.log(sample + eps) # Add a small epsilon to avoid log(0)
+        log_sample = torch.log(sample + self.eps) # Add a small epsilon to avoid log(0)
+
+        if self.scale01:
+            # Find the global maximum value in the training data or use global statistics max
+            if glob_max is None:
+                glob_max = torch.max(log_sample)
+            # Scale the log-transformed data to [0, 1], with a % buffer
+            log_sample = log_sample / (glob_max + self.buffer * glob_max)
 
         return log_sample
     
@@ -210,10 +223,15 @@ class PrcpLogBackTransform(object):
     Class for back-transforming the log-transformed precipitation data.
     The data is back-transformed by taking the exponential of the data.
     '''
-    def __init__(self): 
+    def __init__(self, scale01 = True,
+                 glob_max=None, buffer=0.5): 
         '''
         Initialize the class.
         '''
+        self.scale01 = scale01
+        self.glob_max = glob_max
+        self.buffer = buffer
+
         pass
 
     def __call__(self, sample):
@@ -225,7 +243,14 @@ class PrcpLogBackTransform(object):
         if not isinstance(sample, torch.Tensor):
             sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
 
-        # Back-transform the sample
+        if self.scale01:
+            # Find the global maximum value in the training data or use global statistics max
+            if glob_max is None:
+                glob_max = torch.max(sample)
+            # Scale the log-transformed data to [0, 1], with a % buffer
+            sample = sample * (glob_max + self.buffer * glob_max)
+
+        # Back-transform the log-transformed sample
         back_transformed_sample = torch.exp(sample)
 
         return back_transformed_sample
