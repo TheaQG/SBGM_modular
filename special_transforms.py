@@ -178,15 +178,27 @@ class PrcpLogTransform(object):
     Class for log-transforming the precipitation data.
     The data is transformed by taking the logarithm of the data.
     '''
-    def __init__(self, eps=1e-8, scale01 = True,
-                 glob_max=None, buffer=0.5): 
+    def __init__(self,
+                 eps=1e-10,
+                 scale_to_01 = True,
+                 min_log=None,
+                 max_log=None,
+                 buffer_frac=0.5,
+                 ):
         '''
         Initialize the class.
         '''
         self.eps = eps
-        self.scale01 = scale01
-        self.glob_max = glob_max
-        self.buffer = buffer
+        self.scale_to_01 = scale_to_01
+        self.min_log = min_log
+        self.max_log = max_log
+        self.buffer_frac = buffer_frac
+
+        if self.min_log is not None and self.max_log is not None:
+            # Optionally, expand the log range by a fraction of the range
+            log_range = self.max_log - self.min_log
+            self.min_log = self.min_log - self.buffer_frac * log_range
+            self.max_log = self.max_log + self.buffer_frac * log_range
 
         pass
 
@@ -200,20 +212,22 @@ class PrcpLogTransform(object):
         if not isinstance(sample, torch.Tensor):
             sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
 
-        # Ensure the sample is non-negative
-        if (sample < 0).any():
-            raise ValueError('The sample contains negative values and cannot be log-transformed.')
-        
-
         # Log-transform the sample
         log_sample = torch.log(sample + self.eps) # Add a small epsilon to avoid log(0)
 
-        if self.scale01:
-            # Find the global maximum value in the training data or use global statistics max
-            if glob_max is None:
-                glob_max = torch.max(log_sample)
-            # Scale the log-transformed data to [0, 1], with a % buffer
-            log_sample = log_sample / (glob_max + self.buffer * glob_max)
+        if self.scale_to_01:
+            if (self.min_log is None) or (self.max_log is None):
+                # If the min and max log values are not provided, find them in the data
+                self.min_log = torch.min(log_sample)
+                self.max_log = torch.max(log_sample)
+                # BUT WE GENERALLY WANT TO USE GLOBAL STATISTICS FOR LARGE DATASETS
+            
+            # Shift and scale to [0, 1]: (log_sample - min_log) / (max_log - min_log)
+            denom = (self.max_log - self.min_log)
+            # If denominator is zero, raise an error
+            if denom == 0:
+                raise ValueError("The log-range of data is zero. Cannot scale to [0, 1]. Please check the data.")
+            log_sample = (log_sample - self.min_log) / (denom)
 
         return log_sample
     
@@ -223,14 +237,14 @@ class PrcpLogBackTransform(object):
     Class for back-transforming the log-transformed precipitation data.
     The data is back-transformed by taking the exponential of the data.
     '''
-    def __init__(self, scale01 = True,
-                 glob_max=None, buffer=0.5): 
+    def __init__(self, scale_to_01 = True,
+                 glob_max=None, buffer_frac=0.5): 
         '''
         Initialize the class.
         '''
-        self.scale01 = scale01
+        self.scale_to_01 = scale_to_01
         self.glob_max = glob_max
-        self.buffer = buffer
+        self.buffer_frac = buffer_frac
 
         pass
 
@@ -243,12 +257,12 @@ class PrcpLogBackTransform(object):
         if not isinstance(sample, torch.Tensor):
             sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
 
-        if self.scale01:
+        if self.scale_to_01:
             # Find the global maximum value in the training data or use global statistics max
-            if glob_max is None:
-                glob_max = torch.max(sample)
-            # Scale the log-transformed data to [0, 1], with a % buffer
-            sample = sample * (glob_max + self.buffer * glob_max)
+            if self.glob_max is None:
+                self.glob_max = torch.max(sample)
+            # Scale the log-transformed data to [0, 1], with a % buffer_frac
+            sample = sample * (self.glob_max + self.buffer_frac * self.glob_max)
 
         # Back-transform the log-transformed sample
         back_transformed_sample = torch.exp(sample)

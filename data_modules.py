@@ -206,13 +206,15 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 topo_full_domain = None,            # Topography of full domain
                 sdf_weighted_loss:bool = False,     # Whether to use weighted loss for SDF
                 scale:bool = True,                  # Whether to scale data to new interval
-                scale_mean:float = 8.69251,           # Mean of data for scaling
-                scale_std:float = 6.192434,            # Standard deviation of data for scaling
+                scale_mean:float = 8.69251,         # Mean of data for scaling
+                scale_std:float = 6.192434,         # Standard deviation of data for scaling
                 scale_min:float = 0,                # Minimum value of data for scaling (in mm) - in precipitation data
                 scale_max:float = 160,              # Maximum value of data for scaling (in mm) - in precipitation data
-                buffer:float = 0.5,                 # Percentage buffer for scaling
-                conditional_seasons:bool = False,    # Whether to use seasonal conditional sampling
-                conditional_images:bool = False,     # Whether to use image conditional sampling
+                scale_min_log:float = 1e-10,        # Minimum value for log transform
+                scale_max_log:float = 1,            # Maximum value for log transformƒ
+                buffer_frac:float = 0.5,            # Percentage buffer_frac for scaling
+                conditional_seasons:bool = False,   # Whether to use seasonal conditional sampling
+                conditional_images:bool = False,    # Whether to use image conditional sampling
                 cond_dir_zarr:str = None,           # Path to directory containing conditional data
                 n_classes:int = None                # Number of classes for conditional sampling
                 ):                       
@@ -230,7 +232,9 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         self.scale_std = scale_std
         self.scale_min = scale_min
         self.scale_max = scale_max
-        self.buffer = buffer
+        self.scale_min_log = scale_min_log
+        self.scale_max_log = scale_max_log
+        self.buffer_frac = buffer_frac
         
         self.shuffle = shuffle
         self.cutouts = cutouts
@@ -255,7 +259,10 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             print('Converting ERA5 data to [mm] by multiplying by 1000\n')
             if self.scale:
                 print('Using PrcpLogTransform to scale data to new interval')
-                print(f'New interval: [{self.scale_min}, {self.scale_max}] with buffer={self.buffer}\n\n')
+                print(f'Original interval in [mm]: [{self.scale_min}, {self.scale_max}]')
+                print(f'Original interval in [log(mm)]: [{self.scale_min_log}, {self.scale_max_log}]')
+                print(f'Converting data to log-space, and scaling to [0, 1] interval\n\n')
+                
         elif self.variable == 'temp':
             print('DANRA and  ERA5 data in [Kelvin]')
             print('Converting data to [Celsius] by subtracting 273.15\n')
@@ -366,7 +373,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                     transforms.ToTensor(),
                     transforms.Resize(self.data_size, antialias=True),
                     # Use log transform for precipitation data:
-                    PrcpLogTransform(eps=1e-8, scale01=True, glob_max=self.scale_max, buffer=self.buffer)
+                    PrcpLogTransform(eps=1e-10, scale_to_01=True, min_log=self.scale_min, max_log=self.scale_max, buffer_frac=self.buffer_frac)
                     # # Use Scale transform to scale data to new interval (based on ERA5 training data, (min = 0, max = 0.160m)):
                     # Scale(0, 0.160, 0, 1)
                     ])
@@ -479,6 +486,17 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             except:
                 # DANRA in [mm]
                 img = self.zarr_group_img[file_name]['data'][()][:,:]
+            # If sample has negative values, set them to eps=1e-8
+            # Print negative values found
+            if (img < 0).any():
+                print(f'Negative values found in sample {file_name}')
+                print(f'Number of negative values: {np.sum(img < 0)}')
+                print(f'Number of values in sample: {img.size}')
+                print(f'Minimum value in sample: {np.min(img)}')
+                print(f'Setting negative values to eps=1e-10')
+                # Set negative values to eps=1e-8
+                img[img <= 0] = 1e-10
+
             if self.conditional_images:
                 if self.cond_dir_zarr is None:
                     # Compute the mean of sample
@@ -488,6 +506,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 else:
                     # ERA5 in [m] - convert to [mm] by multiplying by 1000
                     img_cond = self.zarr_group_cond[file_name_cond]['arr_0'][()][:,:] * 1000
+                img_cond[img_cond <= 0] == 1e-10
+            
 
 
         if self.cutouts:

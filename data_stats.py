@@ -57,6 +57,7 @@ def data_stats_from_args():
     parser.add_argument('--save_figs', type=str2bool, default=True, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--save_stats', type=str2bool, default=False, help='Whether to save the statistics')
+    parser.add_argument('--print_final_stats', type=str2bool, default=False, help='Whether to print the statistics')
     parser.add_argument('--fig_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_figures/', help='The path to save the figures')
     parser.add_argument('--stats_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_statistics', help='The path to save the statistics')
     parser.add_argument('--transformations', nargs='+', default=None, help='List of transformations to apply to the data', choices=['zscore', 'log', 'log01'])
@@ -98,6 +99,7 @@ class DataStats:
                 save_figs=False,
                 show_figs=True,
                 save_stats=False,
+                print_final_stats=False,
                 fig_path='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/',
                 stats_path='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/',
                 transformations=None,
@@ -113,6 +115,7 @@ class DataStats:
         self.save_figs = save_figs      # Whether to save the figures
         self.show_figs = show_figs      # Whether to show the figures
         self.save_stats = save_stats    # Whether to save the statistics
+        self.print_final_stats = print_final_stats  # Whether to print the statistics
         self.fig_path = fig_path        # The path to save the figures
         self.stats_path = stats_path    # The path to save the statistics
         self.transformations = transformations if transformations else [] # List of transformations to apply to the data
@@ -196,8 +199,17 @@ class DataStats:
         if self.var == 'temp':
             data = data - 273.15
         elif self.var == 'prcp':
-            data[data <= 0] = 1e-4
+            data[data <= 0] = 1e-8
         
+        # Compute log-min and log-max for prcp
+        if self.var == 'prcp':
+            data_log = np.log(data)
+            file_min_log = np.min(data_log)
+            file_max_log = np.max(data_log)
+        else:
+            file_min_log = None
+            file_max_log = None
+
         # Compute stats
         mean, median, std_dev, variance, min_val, max_val, _ = self.compute_statistics(data)
         date_obj = self.parse_file_date(file)
@@ -212,6 +224,12 @@ class DataStats:
             "min": min_val,
             "max": max_val,
         }
+
+        # also store min-log and max-log for prcp
+        if self.var == 'prcp':
+            single_stats["min_log"] = file_min_log
+            single_stats["max_log"] = file_max_log
+
         return (single_stats, data)
 
     def load_data(self, plot_cutout=True):
@@ -243,6 +261,11 @@ class DataStats:
             "min": [],
             "max": [],
         }
+
+        # If prcp, also add min-log, max-log
+        if self.var == 'prcp':
+            stats_dict["min_log"] = []
+            stats_dict["max_log"] = []
         all_data_list = []
 
         # Prepare figure and stats paths
@@ -276,6 +299,11 @@ class DataStats:
                     stats_dict["min"].append(single_stats["min"])
                     stats_dict["max"].append(single_stats["max"])
 
+                    # Also store min-log and max-log for prcp
+                    if self.var == 'prcp':
+                        stats_dict["min_log"].append(single_stats["min_log"])
+                        stats_dict["max_log"].append(single_stats["max_log"])
+
                     # Save data if we want global distribution
                     all_data_list.append(data)
 
@@ -304,6 +332,11 @@ class DataStats:
                 stats_dict["min"].append(single_stats["min"])
                 stats_dict["max"].append(single_stats["max"])
 
+                # Also store min-log and max-log for prcp
+                if self.var == 'prcp':
+                    stats_dict["min_log"].append(single_stats["min_log"])
+                    stats_dict["max_log"].append(single_stats["max_log"])
+
                 # Save data if we want global distribution
                 all_data_list.append(data)
 
@@ -318,7 +351,25 @@ class DataStats:
         # Convert lists to arrays
         for k in ["mean","median","std_dev","variance","min","max"]:
             stats_dict[k] = np.array(stats_dict[k], dtype=float)
-        
+
+        # Also convert min-log and max-log for prcp
+        if self.var == 'prcp':
+            stats_dict["min_log"] = np.array(stats_dict["min_log"], dtype=float)
+            stats_dict["max_log"] = np.array(stats_dict["max_log"], dtype=float)
+
+        # Print final stats
+        if self.print_final_stats:
+            print(f"\nFinal stats for {self.data_type} {self.var.capitalize()} {self.split_type}:")
+            print(f"Mean: {np.mean(stats_dict['mean']):.2f}")
+            print(f"Median: {np.mean(stats_dict['median']):.2f}")
+            print(f"Std Dev: {np.mean(stats_dict['std_dev']):.2f}")
+            print(f"Variance: {np.mean(stats_dict['variance']):.2f}")
+            print(f"Min: {np.mean(stats_dict['min']):.2f}")
+            print(f"Max: {np.mean(stats_dict['max']):.2f}")
+            if self.var == 'prcp':
+                print(f"Min Log: {np.mean(stats_dict['min_log']):.2f}")
+                print(f"Max Log: {np.mean(stats_dict['max_log']):.2f}")
+
         # Optionally save stats
         if self.save_stats:
             if not os.path.exists(self.stats_path):
