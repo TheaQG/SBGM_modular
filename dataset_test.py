@@ -34,6 +34,9 @@ def launch_test_dataset_from_args():
     parser.add_argument('--scale_std', type=float, default=6.192434, help='STD of OG data distribution (Temperature [C])')
     parser.add_argument('--scale_min', type=float, default=0, help='Minimum of OG data distribution (Precipitation [mm])')
     parser.add_argument('--scale_max', type=float, default=160, help='Maximum of OG data distribution (Precipitation [mm])')
+    parser.add_argument('--scale_min_log', type=float, default=-15, help='Minimum of log-transformed data distribution (Precipitation [mm])')
+    parser.add_argument('--scale_max_log', type=float, default=5, help='Maximum of log-transformed data distribution (Precipitation [mm])')
+    parser.add_argument('--buffer_frac', type=int, default=0.5, help='The percentage buffer size for precipition transformation')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
@@ -158,6 +161,9 @@ def test_dataset(args):
                                     scale_std=args.scale_std,
                                     scale_min=args.scale_min,
                                     scale_max=args.scale_max,
+                                    scale_min_log=args.scale_min_log,
+                                    scale_max_log=args.scale_max_log,
+                                    buffer_frac=args.buffer_frac,
                                     conditional_seasons=sample_w_cond_season,
                                     conditional_images=sample_w_cond_img,
                                     cond_dir_zarr = data_dir_era5_zarr,
@@ -203,6 +209,7 @@ def test_dataset(args):
                 fig.suptitle(f'Dataset with scaling, mean: {args.scale_mean}, std: {args.scale_std}')
             elif var == 'prcp':
                 fig.suptitle(f'Dataset with scaling, min: {args.scale_min}, max: {args.scale_max}')
+                
         else:
             fig.suptitle(f'Dataset without scaling')
 
