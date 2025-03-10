@@ -1,13 +1,60 @@
 import os
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-import datetime
+from utils import *
 
 # Reuse your existing DataStats class
 from data_stats import DataStats
 
 
+def launch_data_comparison_from_args(args):
+    """
+    Launch a DatasetComparison instance using argparse arguments.
+    """
 
+    parser = argparse.ArgumentParser(description="Compare multiple datasets side by side.")
+    parser.add_argument('--var', type=str, default='prcp', help='Variable to compare')
+    parser.add_argument('--data_types', type=str, nargs='+', required=True, help='Data types to compare')
+    parser.add_argument('--splits', type=str, nargs='+', required=True, help='Splits to compare')
+    parser.add_argument('--path_data', type=str, default='.', help='Path to data')
+    parser.add_argument('--transformations', type=str, nargs='+', default=None, help='Transformations to apply', choices=['zscore','minmax,'])
+    parser.add_argument('--time_agg', type=str, default='daily', help='Time aggregation')
+    parser.add_argument('--create_figs', type=str2bool, default=True, help='Create figures')
+    parser.add_argument('--save_figs', type=str2bool, default=False, help='Save figures')
+    parser.add_argument('--show_figs', type=str2bool, default=False, help='Show figures')
+    parser.add_argument('--save_stats', type=str2bool, default=False, help='Save stats')
+    parser.add_argument('--fig_path', type=str, default='./figs_comparison/', help='Path for figures')
+    parser.add_argument('--stats_path', type=str, default='./stats_comparison/', help='Path for stats')
+    parser.add_argument('--n_workers', type=int, default=1, help='Number of workers')
+
+    args = parser.parse_args(args)
+
+    print(f'Running data comparison with args: {args}')
+    run_data_comparison(args)
+
+    
+
+def run_data_comparison(args):
+    """
+    Run a DatasetComparison instance using argparse arguments.
+    """
+    cmp = DatasetComparison(
+        var=args.var,
+        data_types=args.data_types,
+        splits=args.splits,
+        path_data=args.path_data,
+        transformations=args.transformations,
+        time_agg=args.time_agg,
+        create_figs=args.create_figs,
+        save_figs=args.save_figs,
+        show_figs=args.show_figs,
+        save_stats=args.save_stats,
+        fig_path=args.fig_path,
+        stats_path=args.stats_path,
+        n_workers=args.n_workers
+    )
+    cmp.run()
 
 class DatasetComparison:
     """

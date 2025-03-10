@@ -176,31 +176,50 @@ class ZScoreBackTransform(object):
 class PrcpLogTransform(object):
     '''
     Class for log-transforming the precipitation data.
-    The data is transformed by taking the logarithm of the data.
+    Data is transformed to log-space and optionally scaled to [0, 1] or to mu=0, sigma=1.
     '''
     def __init__(self,
                  eps=1e-10,
-                 scale_to_01 = True,
-                 min_log=None,
-                 max_log=None,
+                 scale_type='log_zscore', # 'log_zscore' or 'log01'
+                 glob_mean_log=None,
+                 glob_std_log=None,
+                 glob_min_log=None,
+                 glob_max_log=None,
                  buffer_frac=0.5,
                  ):
         '''
         Initialize the class.
         '''
         self.eps = eps
-        self.scale_to_01 = scale_to_01
-        self.min_log = min_log
-        self.max_log = max_log
+        self.scale_type = scale_type
+        self.glob_mean_log = glob_mean_log
+        self.glob_std_log = glob_std_log
+        self.glob_min_log = glob_min_log
+        self.glob_max_log = glob_max_log
         self.buffer_frac = buffer_frac
 
-        if self.min_log is not None and self.max_log is not None:
+        if self.glob_min_log is not None and self.glob_max_log is not None:
             # Optionally, expand the log range by a fraction of the range
-            log_range = self.max_log - self.min_log
-            self.min_log = self.min_log - self.buffer_frac * log_range
-            self.max_log = self.max_log + self.buffer_frac * log_range
+            log_range = self.glob_max_log - self.glob_min_log
+            self.glob_min_log = self.glob_min_log - self.buffer_frac * log_range
+            self.glob_max_log = self.glob_max_log + self.buffer_frac * log_range
 
+        if self.scale_type == 'log_zscore':
+            if (self.glob_mean_log is None) or (self.glob_std_log is None):
+                raise ValueError("Global mean and standard deviation not provided. Using local statistics is not recommended.")
+        elif self.scale_type == 'log01':
+            if (self.glob_min_log is None) or (self.glob_max_log is None):
+                raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
+        elif self.scale_type == 'log_minus1_1':
+            if (self.glob_min_log is None) or (self.glob_max_log is None):
+                raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
+        elif self.scale_type == 'log':
+            pass
+        else:
+            raise ValueError("Invalid scale type. Please choose '01' or 'ZScore'.")
+        
         pass
+
 
     def __call__(self, sample):
         '''
@@ -215,36 +234,87 @@ class PrcpLogTransform(object):
         # Log-transform the sample
         log_sample = torch.log(sample + self.eps) # Add a small epsilon to avoid log(0)
 
-        if self.scale_to_01:
-            if (self.min_log is None) or (self.max_log is None):
+        print(f"Min log in sample: {torch.min(log_sample)}")
+        print(f"Max log in sample: {torch.max(log_sample)}")
+        # Scale the log-transformed data to [0,1]ß
+        if self.scale_type == 'log01':
+            if (self.glob_min_log is None) or (self.glob_max_log is None):
                 # If the min and max log values are not provided, find them in the data
-                self.min_log = torch.min(log_sample)
-                self.max_log = torch.max(log_sample)
+                self.glob_min_log = torch.min(log_sample)
+                self.glob_max_log = torch.max(log_sample)
                 # BUT WE GENERALLY WANT TO USE GLOBAL STATISTICS FOR LARGE DATASETS
             
-            # Shift and scale to [0, 1]: (log_sample - min_log) / (max_log - min_log)
-            denom = (self.max_log - self.min_log)
+            # Shift and scale to [0, 1]: (log_sample - glob_min_log) / (glob_max_log - glob_min_log)
+            denom = (self.glob_max_log - self.glob_min_log)
             # If denominator is zero, raise an error
             if denom == 0:
                 raise ValueError("The log-range of data is zero. Cannot scale to [0, 1]. Please check the data.")
-            log_sample = (log_sample - self.min_log) / (denom)
+            log_sample = (log_sample - self.glob_min_log) / (denom)
+        
+        # Scale the log-transformed data to have mean 0 and std 1
+        elif self.scale_type == 'log_zscore':
+            # Standardize the log-transformed data
+            mu = self.glob_mean_log
+            sigma = self.glob_std_log
+
+            log_sample = (log_sample - mu) / (sigma + 1e-8)  
+            print(f"Min log in sample (zscore): {torch.min(log_sample)}")
+            print(f"Max log in sample (zscore): {torch.max(log_sample)}")
+        elif self.scale_type == 'log_minus1_1':
+            # Scale the log-transformed data to [-1, 1]
+            log_sample = 2 * (log_sample - self.glob_min_log) / (self.glob_max_log - self.glob_min_log) - 1
+
+        elif self.scale_type == 'log':
+            pass
+        else:
+            raise ValueError("Invalid scale type. Please choose 'log01' or 'log_zscore' or 'log'.")
 
         return log_sample
     
-# Back transform the log-transformed data
+# Back transform the log-transformed data, with min and max values provided
 class PrcpLogBackTransform(object):
     '''
     Class for back-transforming the log-transformed precipitation data.
-    The data is back-transformed by taking the exponential of the data.
+    The data is back-transformed to the original distribution.
     '''
-    def __init__(self, scale_to_01 = True,
-                 glob_max=None, buffer_frac=0.5): 
+    def __init__(self,
+                 scale_type='log_zscore', # 'log_zscore' or 'log01'
+                 glob_mean=None,
+                 glob_std=None,
+                 glob_min_log=None,
+                 glob_max_log=None,
+                 buffer_frac=0.5,
+                 ):
         '''
         Initialize the class.
         '''
-        self.scale_to_01 = scale_to_01
-        self.glob_max = glob_max
+        self.scale_type = scale_type
+        self.glob_mean = glob_mean
+        self.glob_std = glob_std
+        self.glob_min_log = glob_min_log
+        self.glob_max_log = glob_max_log
         self.buffer_frac = buffer_frac
+
+        if self.glob_min_log is not None and self.glob_max_log is not None:
+            # Optionally, expand the log range by a fraction of the range
+            log_range = self.glob_max_log - self.glob_min_log
+            self.glob_min_log = self.glob_min_log - self.buffer_frac * log_range
+            self.glob_max_log = self.glob_max_log + self.buffer_frac * log_range
+
+        if self.scale_type == 'log_zscore':
+            if (self.glob_mean is None) or (self.glob_std is None):
+                raise ValueError("Global mean and standard deviation not provided. Using local statistics is not recommended.")
+        elif self.scale_type == 'log01':
+            if (self.glob_min_log is None) or (self.glob_max_log is None):
+                raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
+        elif self.scale_type == 'log_minus1_1':
+            if (self.glob_min_log is None) or (self.glob_max_log is None):
+                raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
+        elif self.scale_type == 'log':
+            pass
+                
+        else:
+            raise ValueError("Invalid scale type. Please choose from ['log01', 'log_zscore', 'log_minus1_1', 'log'].")
 
         pass
 
@@ -257,17 +327,28 @@ class PrcpLogBackTransform(object):
         if not isinstance(sample, torch.Tensor):
             sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
 
-        if self.scale_to_01:
-            # Find the global maximum value in the training data or use global statistics max
-            if self.glob_max is None:
-                self.glob_max = torch.max(sample)
-            # Scale the log-transformed data to [0, 1], with a % buffer_frac
-            sample = sample * (self.glob_max + self.buffer_frac * self.glob_max)
-
-        # Back-transform the log-transformed sample
-        back_transformed_sample = torch.exp(sample)
+        if self.scale_type == 'log01':
+            # Back-transform the data to log-space
+            log_sample = sample
+            # Scale the log-transformed data back to the original range
+            back_transformed_sample = log_sample * (self.glob_max_log - self.glob_min_log) + self.glob_min_log
+            # Inverse log-transform the data
+            back_transformed_sample = torch.exp(back_transformed_sample)
+        elif self.scale_type == 'log_zscore':
+            # Back-transform the data to log-space
+            mu = self.glob_mean
+            sigma = self.glob_std
+            log_sample = (sample * (sigma + 1e-8)) + mu
+            # Inverse log-transform the data
+            back_transformed_sample = torch.exp(log_sample)
+        elif self.scale_type == 'log_minus1_1':
+            # Back-transform the data to log-space
+            log_sample = 0.5 * (sample + 1) * (self.glob_max_log - self.glob_min_log) + self.glob_min_log
+            # Inverse log-transform the data
+            back_transformed_sample = torch.exp(log_sample)
+        elif self.scale_type == 'log':
+            back_transformed_sample = torch.exp(sample)
+        else:
+            raise ValueError("Invalid scale type. Please choose from ['log01', 'log_zscore', 'log_minus1_1', 'log'].")
 
         return back_transformed_sample
-
-
-

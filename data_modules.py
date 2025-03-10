@@ -206,12 +206,16 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 topo_full_domain = None,            # Topography of full domain
                 sdf_weighted_loss:bool = False,     # Whether to use weighted loss for SDF
                 scale:bool = True,                  # Whether to scale data to new interval
-                scale_mean:float = 8.69251,         # Mean of data for scaling
-                scale_std:float = 6.192434,         # Standard deviation of data for scaling
-                scale_min:float = 0,                # Minimum value of data for scaling (in mm) - in precipitation data
-                scale_max:float = 160,              # Maximum value of data for scaling (in mm) - in precipitation data
-                scale_min_log:float = 1e-10,        # Minimum value for log transform
-                scale_max_log:float = 1,            # Maximum value for log transformƒ
+                save_original:bool = False,         # Whether to save original data
+                scale_mean:float = 8.69251,         # Global mean of data for scaling
+                scale_std:float = 6.192434,         # Global standard deviation of data for scaling
+                scale_type_prcp:str = 'log_zscore', # Type of scaling for precipitation data
+                scale_min:float = 0,                # Global minimum value of data for scaling (in mm) - in precipitation data
+                scale_max:float = 160,              # Global maximum value of data for scaling (in mm) - in precipitation data
+                scale_min_log:float = 1e-10,        # Global minimum value for log transform
+                scale_max_log:float = 1,            # Maximum value for log transform
+                scale_mean_log:float = 0,           # Global mean value for log transform
+                scale_std_log:float = 1,            # Global standard deviation for log transform
                 buffer_frac:float = 0.5,            # Percentage buffer_frac for scaling
                 conditional_seasons:bool = False,   # Whether to use seasonal conditional sampling
                 conditional_images:bool = False,    # Whether to use image conditional sampling
@@ -228,12 +232,17 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         self.variable = variable
         
         self.scale = scale
+        self.save_original = save_original
         self.scale_mean = scale_mean
         self.scale_std = scale_std
+
+        self.scale_type_prcp = scale_type_prcp
         self.scale_min = scale_min
         self.scale_max = scale_max
         self.scale_min_log = scale_min_log
         self.scale_max_log = scale_max_log
+        self.scale_mean_log = scale_mean_log
+        self.scale_std_log = scale_std_log
         self.buffer_frac = buffer_frac
         
         self.shuffle = shuffle
@@ -268,7 +277,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             print('Converting data to [Celsius] by subtracting 273.15\n')
             if self.scale:
                 print('Using Z-score transform to scale data to new distribution')
-                print(f'New distribution: mean={self.scale_mean}, std={self.scale_std}\n\n')
+                print(f'Old distribution: mean={self.scale_mean}, std={self.scale_std}')
+                print(f'New distribution: mean=0, std=1\n\n')
 
         # Make zarr groups of data
         self.zarr_group_img = zarr.open_group(data_dir_zarr, mode='r')
@@ -373,7 +383,13 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                     transforms.ToTensor(),
                     transforms.Resize(self.data_size, antialias=True),
                     # Use log transform for precipitation data:
-                    PrcpLogTransform(eps=1e-10, scale_to_01=True, min_log=self.scale_min, max_log=self.scale_max, buffer_frac=self.buffer_frac)
+                    PrcpLogTransform(eps=1e-10,
+                                     scale_type=self.scale_type_prcp,
+                                     glob_mean_log=self.scale_mean,
+                                     glob_std_log=self.scale,
+                                     glob_min_log=self.scale_min_log,
+                                     glob_max_log=self.scale_max_log,
+                                     buffer_frac=self.buffer_frac)
                     # # Use Scale transform to scale data to new interval (based on ERA5 training data, (min = 0, max = 0.160m)):
                     # Scale(0, 0.160, 0, 1)
                     ])
@@ -489,11 +505,11 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
             # If sample has negative values, set them to eps=1e-8
             # Print negative values found
             if (img < 0).any():
-                print(f'Negative values found in sample {file_name}')
-                print(f'Number of negative values: {np.sum(img < 0)}')
-                print(f'Number of values in sample: {img.size}')
-                print(f'Minimum value in sample: {np.min(img)}')
-                print(f'Setting negative values to eps=1e-10')
+                # print(f'Negative values found in sample {file_name}')
+                # print(f'Number of negative values: {np.sum(img < 0)}')
+                # print(f'Number of values in sample: {img.size}')
+                # print(f'Minimum value in sample: {np.min(img)}')
+                # print(f'Setting negative values to eps=1e-10')
                 # Set negative values to eps=1e-8
                 img[img <= 0] = 1e-10
 
@@ -529,7 +545,13 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 img_cond = img_cond[point[0]:point[1], point[2]:point[3]]
         else:
             point = None
-        
+
+        # If save_original is True, save original image and conditional image
+        if self.save_original:
+            img_original = img.copy()
+            if self.conditional_images:
+                img_cond_original = img_cond.copy()
+
         # Apply transforms if any
         if self.transforms:
             img = self.transforms(img)
@@ -548,16 +570,25 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         if self.conditional_images:
             # Return sample image and classifier
             if self.conditional_seasons:
-                # Make a dict with image and conditions
-                sample_dict = {'img':img, 'classifier':classifier, 'img_cond':img_cond}
+                # Make a dict with image and conditions (and originals, if save_original is True)
+                if self.save_original:
+                    sample_dict = {'img':img, 'img_original':img_original, 'classifier':classifier, 'img_cond':img_cond, 'img_cond_original':img_cond_original}
+                else:
+                    sample_dict = {'img':img, 'classifier':classifier, 'img_cond':img_cond}
                 #sample = (img, classifier, img_cond)
             else:
                 # Make a dict with image and conditions
-                sample_dict = {'img':img, 'img_cond':img_cond}
+                if self.save_original:
+                    sample_dict = {'img':img, 'img_original':img_original, 'img_cond':img_cond, 'img_cond_original':img_cond_original}
+                else:
+                    sample_dict = {'img':img, 'img_cond':img_cond}
                 #sample = (img, img_cond)
         else:
-            # Return sample image as dict
-            sample_dict = {'img':img}
+            # Return sample image as dict (with original image if save_original is True)
+            if self.save_original:
+                sample_dict = {'img':img, 'img_original':img_original}
+            else:
+                sample_dict = {'img':img}
             sample = (img)
         
         # Add item to cache
@@ -597,6 +628,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
         else:
             # Return sample image and classifier only
             return sample_dict #sample
+        
     
     def __name__(self, idx:int):
         '''

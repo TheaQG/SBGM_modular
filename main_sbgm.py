@@ -44,10 +44,12 @@ def main_sbgm(args):
         print(f'Warning: HR_VAR: {var} is not the same as LR_VARS[0]: {lr_vars[0]}. Setting LR_VARS[0] to HR_VAR')
         lr_vars[0] = var
 
-
     # Set scaling to true or false
     scaling = args.scaling
     noise_variance = args.noise_variance
+
+    # Define wether to transform data back from normalization/log-space before plotting
+    transform_back_bf_plot = args.transform_back_bf_plot
 
     # Set some color map settings
     if var == 'temp':
@@ -269,39 +271,57 @@ def main_sbgm(args):
     
     # Define training dataset, with cutouts enabled and data from zarr files
     train_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_train_w_cutouts_zarr, 
-                                            data_size = image_dim, 
-                                            n_samples = n_samples_train, 
-                                            cache_size = cache_size_train, 
+                                            data_size=image_dim, 
+                                            n_samples=n_samples_train, 
+                                            cache_size=cache_size_train, 
                                             variable=var,
+                                            shuffle=False,
+                                            cutouts=CUTOUTS, 
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_train,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss=use_sdf_weighted_loss,
                                             scale=scaling, 
-                                            scale_mean=8.69251,
-                                            scale_std=6.192434,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons,
                                             conditional_images=condition_on_img,
                                             cond_dir_zarr=data_dir_era5_train_zarr, 
-                                            n_classes=n_seasons, 
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
+                                            n_classes=n_seasons
                                             )
     # Define validation dataset, with cutouts enabled and data from zarr files
     valid_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_valid_w_cutouts_zarr, 
-                                            data_size = image_dim, 
-                                            n_samples = n_samples_valid, 
-                                            cache_size = cache_size_valid, 
+                                            data_size=image_dim, 
+                                            n_samples=n_samples_valid, 
+                                            cache_size=cache_size_valid, 
                                             variable=var,
+                                            shuffle=False,
+                                            cutouts=CUTOUTS, 
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_valid,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss=use_sdf_weighted_loss,
                                             scale=scaling,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons, 
                                             conditional_images=condition_on_img,
                                             cond_dir_zarr=data_dir_era5_valid_zarr,
                                             n_classes=n_seasons, 
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
                                             )
     # Define test dataset, with cutouts enabled and data from zarr files
     gen_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_test_w_cutouts_zarr,
@@ -309,17 +329,26 @@ def main_sbgm(args):
                                             n_samples = n_samples_test,
                                             cache_size = cache_size_test,
                                             variable=var,
-                                            scale=scaling,
                                             shuffle=True,
+                                            cutouts=CUTOUTS,
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_test,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss = use_sdf_weighted_loss,
+                                            scale=scaling,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons, 
                                             conditional_images=condition_on_img,    
                                             cond_dir_zarr=data_dir_era5_test_zarr,
                                             n_classes=n_seasons,
-                                            cutouts=CUTOUTS,
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
                                             )
 
 
@@ -454,6 +483,27 @@ def main_sbgm(args):
         # Print the training and validation losses
         print(f'\n\n\nTraining loss: {train_loss:.6f}')
         print(f'Validation loss: {valid_loss:.6f}\n\n\n')
+        
+        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_train', 'wb') as fp:
+            pickle.dump(train_losses, fp)
+        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_valid', 'wb') as fp:
+            pickle.dump(valid_losses, fp)
+
+        if args.create_figs:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+            ax.plot(train_losses, label='Train')
+            ax.plot(valid_losses, label='Validation')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.set_title('Loss')
+            ax.legend(loc='upper right')
+            fig.tight_layout()
+            if args.show_figs:
+                plt.show()
+                
+            if args.save_figs:
+                fig.savefig(PATH_FIGURES + NAME_LOSSES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+
 
         # If validation loss is lower than best loss, save the model. With possibility of early stopping
         if valid_loss < best_loss:
@@ -524,7 +574,6 @@ def main_sbgm(args):
                     # Add generated samples to data_plot and data_names
                     data_plot.append(generated_samples)
                     data_names.append('Generated')
-                    
 
                     # Plotting truth, condition, generated, lsm and topo for n different test images
                     fig, axs = plt.subplots(n_axs+1, n_gen_samples, figsize=(14,9)) 
@@ -532,6 +581,16 @@ def main_sbgm(args):
                     # Make the first row the generated images
                     for i in range(n_gen_samples):
                         img = data_plot[-1][i].squeeze()
+
+                        # If transform back before plotting is enabled, transform back
+                        if transform_back_bf_plot:
+                            # If temperature, Z-score back transform
+                            if var == 'temp':
+                                img = ZScoreBackTransform(mean=args.scale_mean, std=args.scale_std)(img)
+                            # If precipitation, log back transform
+                            elif var == 'prcp':
+                                img = PrcpLogBackTransform(min_log=args.scale_min_log, max_log=args.scale_max_log)(img)
+
                         image = axs[0, i].imshow(img, cmap=cmap_name)
                         axs[0, i].set_title(f'{data_names[-1]}')
                         axs[0, i].axis('off')
@@ -545,8 +604,19 @@ def main_sbgm(args):
                             img = data_plot[j][i].squeeze()
                             if data_names[j] == 'Truth' or data_names[j] == 'Condition':
                                 cmap_name_use = cmap_name
+                                # If transform back before plotting is enabled, transform back (only for Truth and Condition)
+                                if transform_back_bf_plot:
+                                    # If temperature, Z-score back transform
+                                    if var == 'temp':
+                                        img = ZScoreBackTransform(mean=args.scale_mean, std=args.scale_std)(img)
+                                    # If precipitation, log back transform
+                                    elif var == 'prcp':
+                                        img = PrcpLogBackTransform(min_log=args.scale_min_log, max_log=args.scale_max_log)(img)
+
                             else:
                                 cmap_name_use = 'viridis'
+
+                            
                             image = axs[j+1, i].imshow(img, cmap=cmap_name_use)
                             axs[j+1, i].set_title(f'{data_names[j]}')
                             axs[j+1, i].axis('off')
@@ -568,25 +638,6 @@ def main_sbgm(args):
                             print(f'Saving generated samples in {PATH_FIGURES} as {NAME_SAMPLES}{epoch+1}.png')
                     
                     break
-
-                
-                fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-                ax.plot(train_losses, label='Train')
-                ax.plot(valid_losses, label='Validation')
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('Loss')
-                ax.set_title('Loss')
-                ax.legend(loc='upper right')
-                if args.show_figs:
-                    plt.show()
-                    
-                if args.save_figs:
-                    fig.savefig(PATH_FIGURES + NAME_LOSSES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
-
-                with open(PATH_LOSSES + '/' + NAME_LOSSES + '_train', 'wb') as fp:
-                    pickle.dump(train_losses, fp)
-                with open(PATH_LOSSES + '/' + NAME_LOSSES + '_valid', 'wb') as fp:
-                    pickle.dump(valid_losses, fp)
                 
                 # Set model back to train mode
                 pipeline.model.train()

@@ -7,13 +7,13 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 
 from multiprocessing import freeze_support
 
 # Import DANRA dataset class from data_modules.py in src folder
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
+from special_transforms import *
 from utils import *
 
 
@@ -32,6 +32,9 @@ def launch_test_dataset_from_args():
     parser.add_argument('--scaling', type=str2bool, default=False, help='Whether to scale the data')
     parser.add_argument('--scale_mean', type=float, default=8.69251, help='Mean of OG data distribution (Temperature [C])')
     parser.add_argument('--scale_std', type=float, default=6.192434, help='STD of OG data distribution (Temperature [C])')
+    parser.add_argument('--scale_type_prcp', type=str, default='log_zscore', help='Type of scaling for precipitation', choices=['log_zscore', 'log01', 'log', 'log_minus1_1'])
+    parser.add_argument('--scale_mean_log', type=float, default=-25.0, help='Mean of log-transformed data distribution (Precipitation [mm])')
+    parser.add_argument('--scale_std_log', type=float, default=10.0, help='STD of log-transformed data distribution (Precipitation [mm])')
     parser.add_argument('--scale_min', type=float, default=0, help='Minimum of OG data distribution (Precipitation [mm])')
     parser.add_argument('--scale_max', type=float, default=160, help='Maximum of OG data distribution (Precipitation [mm])')
     parser.add_argument('--scale_min_log', type=float, default=-15, help='Minimum of log-transformed data distribution (Precipitation [mm])')
@@ -40,6 +43,7 @@ def launch_test_dataset_from_args():
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
+    parser.add_argument('--show_both_orig_scaled', type=str2bool, default=False, help='Whether to show both the original and scaled data in the same figure')
     parser.add_argument('--path_save', type=str, default='/Users/au728490/Documents/PhD_AU/PhD_AU_material/Figures/', help='The path to save the figures')
     parser.add_argument('--cutout_domains', type=str2list, default=[170, 170+180, 340, 340+180], help='The cutout domains')
     parser.add_argument('--topo_min', type=int, default=-12, help='The minimum value of the topological data')
@@ -94,6 +98,7 @@ def test_dataset(args):
 
     # Set scaling to true or false
     scaling = args.scaling
+    show_both_orig_scaled = args.show_both_orig_scaled
     
     # Set paths to zarr data
     data_dir_danra_zarr = args.path_data + 'data_DANRA/size_589x789/' + var + '_589x789/zarr_files/test.zarr'
@@ -157,12 +162,16 @@ def test_dataset(args):
                                     topo_full_domain = data_topo,
                                     sdf_weighted_loss = args.sample_w_sdf,
                                     scale=scaling,
+                                    save_original=show_both_orig_scaled,
                                     scale_mean=args.scale_mean,
                                     scale_std=args.scale_std,
+                                    scale_type_prcp=args.scale_type_prcp,
                                     scale_min=args.scale_min,
                                     scale_max=args.scale_max,
                                     scale_min_log=args.scale_min_log,
                                     scale_max_log=args.scale_max_log,
+                                    scale_mean_log=args.scale_mean_log,
+                                    scale_std_log=args.scale_std_log,
                                     buffer_frac=args.buffer_frac,
                                     conditional_seasons=sample_w_cond_season,
                                     conditional_images=sample_w_cond_img,
@@ -183,11 +192,25 @@ def test_dataset(args):
     cmaps = [cmap_name]
     cmaps_label = [cmap_label]
 
+    # If show both original and scaled data, add one subplot for each
+    if show_both_orig_scaled:
+        n_subplots += 1
+        img_strs.append('img_original')
+        cmaps.append(cmap_name)
+        cmaps_label.append(cmap_label)
+
     if sample_w_cond_img:
         n_subplots += 1
         img_strs.append('img_cond')
         cmaps.append(cmap_name)
         cmaps_label.append(cmap_label)
+        # If show both original and scaled data, add one subplot for each
+        if show_both_orig_scaled:
+            n_subplots += 1
+            img_strs.append('img_cond_original')
+            cmaps.append(cmap_name)
+            cmaps_label.append(cmap_label)
+    
     if sample_w_lsm_topo:
         n_subplots += 2
         img_strs.append('topo')
@@ -202,58 +225,103 @@ def test_dataset(args):
         cmaps.append('coolwarm')
         cmaps_label.append('')
 
-    if args.show_figs:
-        fig, axs = plt.subplots(n_samples, n_subplots, figsize=(2*n_subplots, 2*n_samples))
+
+    if args.show_figs or args.save_figs:
+        fig, axs = plt.subplots(n_samples, n_subplots, figsize=(2.5*n_subplots, 2.5*n_samples))
         if scaling:
             if var == 'temp':
                 fig.suptitle(f'Dataset with scaling, mean: {args.scale_mean}, std: {args.scale_std}')
             elif var == 'prcp':
-                fig.suptitle(f'Dataset with scaling, min: {args.scale_min}, max: {args.scale_max}')
+                fig.suptitle(f'Dataset from range [{args.scale_min}, max: {args.scale_max}] to log range: [{args.scale_min_log}, {args.scale_max_log}]')
                 
         else:
             fig.suptitle(f'Dataset without scaling')
+
+
+    vmin_img = float('inf')
+    vmax_img = float('-inf')
+    vmin_img_original = float('inf')
+    vmax_img_original = float('-inf')
+
 
     print('\n\nDataset with options:\n')
     for i, idx in enumerate(idxs):
         # Dataset with all options
         sample_full = dataset[idx]
+
+        # Get min and max values for colorbar (between 'img' and 'img_cond')
+        vmin_img = min(vmin_img, sample_full['img'].min(), sample_full['img_cond'].min())
+        vmax_img = max(vmax_img, sample_full['img'].max(), sample_full['img_cond'].max())
+        print('vmin_img: ', vmin_img)
+        print('vmax_img: ', vmax_img)
+
+        # If 'img_original' and 'img_cond_original' are in sample_full, get min and max values for colorbar
+        if show_both_orig_scaled:
+            vmin_img_original = min(vmin_img_original, sample_full['img_original'].min(), sample_full['img_cond_original'].min())
+            vmax_img_original = max(vmax_img_original, sample_full['img_original'].max(), sample_full['img_cond_original'].max())
+            print('vmin_img_original: ', vmin_img_original)
+            print('vmax_img_original: ', vmax_img_original)
+
         print('Content of sample ', idx)
         print(sample_full.keys())
         print('\n\n')
         
 
-        if args.show_figs:
+        if args.show_figs or args.save_figs:
             # go through all subplots
             for j, img_str in enumerate(img_strs):
                 
-
-                im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j])
+                # Plot, with different colorbars depending on the image
+                if img_str in ['img', 'img_cond']:
+                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j], vmin=vmin_img, vmax=vmax_img)
+                elif img_str in ['img_original', 'img_cond_original']:
+                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j], vmin=vmin_img_original, vmax=vmax_img_original)
+                else:
+                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j])
+                
                 axs[i,j].invert_yaxis()
                 axs[i,j].set_xticks([])
                 axs[i,j].set_yticks([])
                 # fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j])
                 # Put truth and condition images in same colorbar
-                
+                cb = fig.colorbar(im, ax=axs[i, j], fraction=0.046, pad=0.04, label=cmaps_label[j])
 
-                if j == 0 or j == 1:
-                    if scaling:
-                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.4f'))
-                    else:
-                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+                # if j == 0 or j == 1:
+                #     if scaling:
+                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.4f'))
+                #     else:
+                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
 
-                else:
-                    if scaling:
-                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.2f'))
-                    else:
-                        cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+                # else:
+                #     if scaling:
+                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.2f'))
+                #     else:
+                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
 
                 if i == 0:
                     axs[i,j].set_title(img_str)
                     print(img_str)
+            # fig.tight_layout()
     
+    # Save the figure
+    if args.save_figs:
+        print(f'Saving figure to {PATH_SAVE}')
+        if scaling:
+            if var == 'temp':
+                fn = f'Dataset_{var}_ZScoreScaled'
+                fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
+            elif var == 'prcp':
+                fn = f'Dataset_{var}_logscaled'
+                fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
+            print(f'with name {fn}')
+        else:
+            fn = f'Dataset_{var}_unscaled'
+            fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
+            print(f'with name {fn}')
+
     if args.show_figs:
-        fig.tight_layout()
         plt.show()
+
     print('\n\n')
 
 
