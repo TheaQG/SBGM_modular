@@ -297,9 +297,11 @@ class PrcpLogBackTransform(object):
 
         if self.glob_min_log is not None and self.glob_max_log is not None:
             # Optionally, expand the log range by a fraction of the range
+            print(f'Extended log range from [{self.glob_min_log}, {self.glob_max_log}]')
             log_range = self.glob_max_log - self.glob_min_log
             self.glob_min_log = self.glob_min_log - self.buffer_frac * log_range
             self.glob_max_log = self.glob_max_log + self.buffer_frac * log_range
+            print(f'to [{self.glob_min_log}, {self.glob_max_log}]\n')
 
         if self.scale_type == 'log_zscore':
             if (self.glob_mean is None) or (self.glob_std is None):

@@ -270,7 +270,24 @@ class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
                 print('Using PrcpLogTransform to scale data to new interval')
                 print(f'Original interval in [mm]: [{self.scale_min}, {self.scale_max}]')
                 print(f'Original interval in [log(mm)]: [{self.scale_min_log}, {self.scale_max_log}]')
-                print(f'Converting data to log-space, and scaling to [0, 1] interval\n\n')
+                if self.scale_type_prcp == 'log_zscore':
+                    print(f'Using Z-score transform to scale data to new distribution')
+                    print(f'Old distribution: mean={self.scale_mean_log}, std={self.scale_std_log}')
+                    print(f'New distribution: mean=0, std=1\n\n')
+                elif self.scale_type_prcp == 'log_01':
+                    log_range = self.scale_max_log - self.scale_min_log
+                    scale_buffer_min = self.scale_min_log - self.buffer_frac*log_range
+                    scale_buffer_max = self.scale_max_log + self.buffer_frac*log_range
+                    print(f'Using log_01 transform to scale data to new interval, with buffer fraction {buffer_frac}')
+                    print(f'Old interval: [{self.scale_min_log}, {self.scale_max_log}], ([{scale_buffer_min}, {scale_buffer_max}])')
+                    print(f'New interval: [0, 1]\n\n')
+                elif self.scale_type_prcp == 'log_minus1_1':
+                    log_range = self.scale_max_log - self.scale_min_log
+                    scale_buffer_min = self.scale_min_log - self.buffer_frac*log_range
+                    scale_buffer_max = self.scale_max_log + self.buffer_frac*log_range
+                    print(f'Using log_minus1_1 transform to scale data to new interval with buffer fraction {buffer_frac}')
+                    print(f'Old interval: [{self.scale_min_log}, {self.scale_max_log}] ([{scale_buffer_min}, {scale_buffer_max}])')
+                    print(f'New interval: [-1, 1]\n\n')
                 
         elif self.variable == 'temp':
             print('DANRA and  ERA5 data in [Kelvin]')

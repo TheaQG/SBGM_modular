@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
-
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from multiprocessing import freeze_support
 
 # Import DANRA dataset class from data_modules.py in src folder
@@ -40,11 +40,12 @@ def launch_test_dataset_from_args():
     parser.add_argument('--scale_min_log', type=float, default=-15, help='Minimum of log-transformed data distribution (Precipitation [mm])')
     parser.add_argument('--scale_max_log', type=float, default=5, help='Maximum of log-transformed data distribution (Precipitation [mm])')
     parser.add_argument('--buffer_frac', type=int, default=0.5, help='The percentage buffer size for precipition transformation')
-    parser.add_argument('--path_data', type=str, default='/Users/au728490/Documents/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
+    parser.add_argument('--path_data', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--show_both_orig_scaled', type=str2bool, default=False, help='Whether to show both the original and scaled data in the same figure')
-    parser.add_argument('--path_save', type=str, default='/Users/au728490/Documents/PhD_AU/PhD_AU_material/Figures/', help='The path to save the figures')
+    parser.add_argument('--show_ocean', type=str2bool, default=False, help='Whether to show the ocean')
+    parser.add_argument('--path_save', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/PhD_AU_material/Figures/', help='The path to save the figures')
     parser.add_argument('--cutout_domains', type=str2list, default=[170, 170+180, 340, 340+180], help='The cutout domains')
     parser.add_argument('--topo_min', type=int, default=-12, help='The minimum value of the topological data')
     parser.add_argument('--topo_max', type=int, default=330, help='The maximum value of the topological data')
@@ -186,53 +187,131 @@ def test_dataset(args):
     n_samples = args.n_gen_samples
     idxs = random.sample(range(0, len(dataset)), n_samples)
 
-    # Figure out how many subplots are needed
-    n_subplots = 1 # For HR image
-    img_strs = ['img']
-    cmaps = [cmap_name]
-    cmaps_label = [cmap_label]
+    # --- BEGIN NEW ORDER SETUP ---
+    # Build a fixed order of subplots:
+    # ['img', 'img_cond', 'img_original', 'img_cond_original'] if show_both_orig_scaled
+    # or ['img', 'img_cond'] if show_both_orig_scaled = False
+    # Then topo/lsm/sdf afterwards if applicable.
 
-    # If show both original and scaled data, add one subplot for each
-    if show_both_orig_scaled:
-        n_subplots += 1
-        img_strs.append('img_original')
-        cmaps.append(cmap_name)
-        cmaps_label.append(cmap_label)
+    img_strs = []
+    cmaps = []
+    cmaps_label = []
+    img_labels = []
+    n_subplots = 0
 
+    # Always 'img'
+    n_subplots += 1
+    img_strs.append('img')
+    cmaps.append(cmap_name)
+    cmaps_label.append(cmap_label)
+    img_labels.append('HR DANRA, scaled' if scaling else 'HR DANRA, unscaled')
+
+    # 'img_cond' if sample_w_cond_img = True
     if sample_w_cond_img:
         n_subplots += 1
         img_strs.append('img_cond')
         cmaps.append(cmap_name)
         cmaps_label.append(cmap_label)
-        # If show both original and scaled data, add one subplot for each
-        if show_both_orig_scaled:
+        img_labels.append('LR ERA5, scaled' if scaling else 'LR ERA5, unscaled')
+
+    # If show_both_orig_scaled, we then add 'img_original' 
+    # (and 'img_cond_original' if sample_w_cond_img)
+    if show_both_orig_scaled:
+        n_subplots += 1
+        img_strs.append('img_original')
+        cmaps.append(cmap_name)
+        cmaps_label.append(cmap_label)
+        img_labels.append('HR DANRA, original')
+
+        if sample_w_cond_img:
             n_subplots += 1
             img_strs.append('img_cond_original')
             cmaps.append(cmap_name)
             cmaps_label.append(cmap_label)
-    
+            img_labels.append('LR ERA5, original')
+
+    # Finally, add topo/lsm/sdf if they exist:
     if sample_w_lsm_topo:
         n_subplots += 2
         img_strs.append('topo')
         cmaps.append('terrain')
         cmaps_label.append('')
+        img_labels.append('Topography')
+
         img_strs.append('lsm')
         cmaps.append('binary')
         cmaps_label.append('')
+        img_labels.append('Land-sea mask')
+
     if sample_w_sdf:
         n_subplots += 1
         img_strs.append('sdf')
         cmaps.append('coolwarm')
         cmaps_label.append('')
+        img_labels.append('SDF')
+    # --- END NEW ORDER SETUP ---
+    # # Figure out how many subplots are needed
+    # n_subplots = 1 # For HR image
+    # img_strs = ['img']
+    # cmaps = [cmap_name]
+    # cmaps_label = [cmap_label]
+
+    # if scaling:
+    #     img_labels = ['HR DANRA, scaled']
+    # else:
+    #     img_labels = ['HR DANRA, unscaled']
+
+    # # If show both original and scaled data, add one subplot for each
+    # if show_both_orig_scaled:
+    #     n_subplots += 1
+    #     img_strs.append('img_original')
+    #     cmaps.append(cmap_name)
+    #     cmaps_label.append(cmap_label)
+    #     img_labels.append('HR DANRA, original')
+
+    # if sample_w_cond_img:
+    #     n_subplots += 1
+    #     img_strs.append('img_cond')
+    #     cmaps.append(cmap_name)
+    #     cmaps_label.append(cmap_label)
+    #     if scaling:
+    #         img_labels.append('LR ERA5, scaled')
+    #     else:
+    #         img_labels.append('LR ERA5, unscaled')
+    #     # If show both original and scaled data, add one subplot for each
+    #     if show_both_orig_scaled:
+    #         n_subplots += 1
+    #         img_strs.append('img_cond_original')
+    #         cmaps.append(cmap_name)
+    #         cmaps_label.append(cmap_label)
+    #         img_labels.append('LR ERA5, original')
+    
+    # if sample_w_lsm_topo:
+    #     n_subplots += 2
+    #     img_strs.append('topo')
+    #     cmaps.append('terrain')
+    #     cmaps_label.append('')
+    #     img_labels.append('Topography')
+
+    #     img_strs.append('lsm')
+    #     cmaps.append('binary')
+    #     cmaps_label.append('')
+    #     img_labels.append('Land-sea mask')
+    # if sample_w_sdf:
+    #     n_subplots += 1
+    #     img_strs.append('sdf')
+    #     cmaps.append('coolwarm')
+    #     cmaps_label.append('')
+    #     img_labels.append('SDF')
 
 
     if args.show_figs or args.save_figs:
-        fig, axs = plt.subplots(n_samples, n_subplots, figsize=(2.5*n_subplots, 2.5*n_samples))
+        fig, axs = plt.subplots(n_samples, n_subplots, figsize=(3*n_subplots, 2.5*n_samples))
         if scaling:
             if var == 'temp':
                 fig.suptitle(f'Dataset with scaling, mean: {args.scale_mean}, std: {args.scale_std}')
             elif var == 'prcp':
-                fig.suptitle(f'Dataset from range [{args.scale_min}, max: {args.scale_max}] to log range: [{args.scale_min_log}, {args.scale_max_log}]')
+                fig.suptitle(f'Dataset with prcp scaling, type: {args.scale_type_prcp}')
                 
         else:
             fig.suptitle(f'Dataset without scaling')
@@ -242,6 +321,12 @@ def test_dataset(args):
     vmax_img = float('-inf')
     vmin_img_original = float('inf')
     vmax_img_original = float('-inf')
+
+    # Fixed min/max for topo and sdf
+    vmin_topo = 0#args.topo_min # wrong, makes DK completely flat
+    vmax_topo = 1 #args.topo_max 
+    vmin_sdf = 0
+    vmax_sdf = 1
 
 
     print('\n\nDataset with options:\n')
@@ -270,38 +355,71 @@ def test_dataset(args):
         if args.show_figs or args.save_figs:
             # go through all subplots
             for j, img_str in enumerate(img_strs):
+                img_data = sample_full[img_str].squeeze()
+
+                # If show_ocean is False, set ocean to nan (i.e. land/sea mask )
+                if not args.show_ocean and img_str not in ['lsm', 'sdf']:
+                    lsm_from_sample = sample_full['lsm'].squeeze()
+                    img_data = np.where(lsm_from_sample < 1, np.nan, img_data)
                 
-                # Plot, with different colorbars depending on the image
+                # Plot, with different colorbars depending on the image (but same colorbar for img and img_cond, and img_original and img_cond_original, respectively)
                 if img_str in ['img', 'img_cond']:
-                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j], vmin=vmin_img, vmax=vmax_img)
+                    vmin, vmax = vmin_img, vmax_img
                 elif img_str in ['img_original', 'img_cond_original']:
-                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j], vmin=vmin_img_original, vmax=vmax_img_original)
+                    vmin, vmax = vmin_img_original, vmax_img_original
+                elif img_str == 'topo':
+                    vmin, vmax = vmin_topo, vmax_topo
+                elif img_str == 'sdf':
+                    vmin, vmax = vmin_sdf, vmax_sdf
                 else:
-                    im = axs[i,j].imshow(sample_full[img_str].squeeze(), cmap=cmaps[j])
+                    vmin, vmax = None, None
                 
+                # Plot the image
+                im = axs[i,j].imshow(img_data, cmap=cmaps[j], vmin=vmin, vmax=vmax, interpolation='nearest')
                 axs[i,j].invert_yaxis()
                 axs[i,j].set_xticks([])
                 axs[i,j].set_yticks([])
-                # fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j])
-                # Put truth and condition images in same colorbar
-                cb = fig.colorbar(im, ax=axs[i, j], fraction=0.046, pad=0.04, label=cmaps_label[j])
 
-                # if j == 0 or j == 1:
-                #     if scaling:
-                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.4f'))
-                #     else:
-                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+                # Add colorbar and boxplot (for selected images)
+                divider = make_axes_locatable(axs[i,j])
 
-                # else:
-                #     if scaling:
-                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, format=tkr.FormatStrFormatter('%.2f'))
-                #     else:
-                #         cb = fig.colorbar(im, ax=axs[i,j], fraction=0.046, pad=0.04, label=cmaps_label[j], format=tkr.FormatStrFormatter('%.2f'))
+                if img_str in ['img', 'img_cond', 'img_original', 'img_cond_original']:
+                    # Boxplot and colorbar 
+                    bax = divider.append_axes("right", size="10%", pad=0.1) # Space for boxplot
+                    cax = divider.append_axes("right", size="5%", pad=0.1) # Space for colorbar
+
+                    # Set some boxplot properties
+                    flierprops = dict(marker='o', markerfacecolor='none', markersize=2, linestyle='none', markeredgecolor='darkgreen', alpha=0.4)
+                    medianprops = dict(linestyle='-', linewidth=2, color='black')
+                    meanlineprops = dict(linestyle=':', linewidth=2, color='firebrick')
+                    meanpointprops = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+                    
+                    # Boxplot of pixel values
+                    img_data_bp = img_data[~np.isnan(img_data)].flatten()
+                    bax.boxplot(img_data_bp,
+                                vert=True,
+                                widths=2,
+                                patch_artist=True,
+                                showmeans=True,
+                                meanline=False,
+                                meanprops=meanpointprops,
+                                medianprops=medianprops,
+                                flierprops=flierprops)
+                    bax.set_xticks([])
+                    bax.set_yticks([])
+                    bax.set_frame_on(False) # Remove frame
+
+                else:
+                    # Only colorbar
+                    cax = divider.append_axes("right", size="5%", pad=0.1) # Space for colorbar
+                fig.colorbar(im, cax=cax)#, label=cmaps_label[j])
+
 
                 if i == 0:
-                    axs[i,j].set_title(img_str)
-                    print(img_str)
-            # fig.tight_layout()
+                    axs[i,j].set_title(img_labels[j])
+                
+                    
+            fig.tight_layout()
     
     # Save the figure
     if args.save_figs:
