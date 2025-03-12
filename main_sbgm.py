@@ -514,6 +514,11 @@ def main_sbgm(args):
 
             # If create figures is enabled, create figures
             if args.create_figs and n_gen_samples > 0 and epoch % args.plot_interval == 0:
+                if var == 'temp':
+                    cmap_var_name = 'plasma'
+                elif var == 'prcp':
+                    cmap_var_name = 'inferno'
+
                 if epoch == 0:
                     print('First epoch, generating samples...')
                 else:
@@ -532,6 +537,29 @@ def main_sbgm(args):
                 pipeline.model.load_state_dict(best_model_state)
                 # Set model to evaluation mode (remember to set back to training mode after generating samples)
                 pipeline.model.eval()
+
+                # Set topography, lsm and sdf vmin and vmax for colorbars 
+                lsm_vmin = 0
+                lsm_vmax = 1
+                sdf_vmin = 0
+                sdf_vmax = 1
+                # Set topo based on scaling or not
+                if scaling:
+                    topo_vmin = 1
+                    topo_vmax = 0
+                else:
+                    topo_vmin = -12
+                    topo_vmax = 300
+                
+                # Setup dictionary with plotting specifics for each variable
+                plot_settings = {
+                    'Truth': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Condition': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Generated': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Topography': {'cmap': 'terrain', 'use_local_scale': False, 'vmin': topo_vmin, 'vmax': topo_vmax},
+                    'LSM': {'cmap': 'binary', 'use_local_scale': False, 'vmin': lsm_vmin, 'vmax': lsm_vmax},
+                    'SDF': {'cmap': 'coolwarm', 'use_local_scale': False, 'vmin': sdf_vmin, 'vmax': sdf_vmax},
+                }
 
                 for idx, samples in tqdm.tqdm(enumerate(gen_dataloader), total=len(gen_dataloader)):
                     sample_batch_size = n_gen_samples
@@ -571,57 +599,141 @@ def main_sbgm(args):
                                                 ).squeeze()
                     generated_samples = generated_samples.detach().cpu()
 
-                    # Add generated samples to data_plot and data_names
+                    # Append generated samples to data_plot and data_names
                     data_plot.append(generated_samples)
                     data_names.append('Generated')
 
-                    # Plotting truth, condition, generated, lsm and topo for n different test images
-                    fig, axs = plt.subplots(n_axs+1, n_gen_samples, figsize=(14,9)) 
-                    
-                    # Make the first row the generated images
-                    for i in range(n_gen_samples):
-                        img = data_plot[-1][i].squeeze()
+                    # -----------------------------------------------------------
+                    # Create figure and axes
+                    # -----------------------------------------------------------
+                    fig, axs = plt.subplots(n_axs + 1, n_gen_samples, figsize=(n_axs*4, n_gen_samples*4))
 
-                        # If transform back before plotting is enabled, transform back
+                    # -----------------------------------------------------------
+                    # For each sample i, find local min/max for T, C and G only
+                    # -----------------------------------------------------------
+                    for i in range(n_gen_samples):
+                        # 1) Gather and (if necessary) back-transform single-sample images
+                        t_img, c_img, g_img = None, None, None
+
+                        # Indices in data_plot/dat_names
+                        try:
+                            idx_truth = data_names.index('Truth')
+                        except ValueError:
+                            idx_truth = None
+                        try:
+                            idx_cond = data_names.index('Condition')
+                        except ValueError:
+                            idx_cond = None
+                        idx_gen = data_names.index('Generated')
+
+                        # -- Truth --
+                        if idx_truth is not None:
+                            t_img = data_plot[idx_truth][i].squeeze()
+                            if transform_back_bf_plot:
+                                if var == 'temp':
+                                    t_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                                std=args.scale_std)(t_img)
+                                elif var == 'prcp':
+                                    t_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                                glob_mean_log=args.scale_mean,
+                                                                glob_std_log=args.scale_std,
+                                                                glob_min_log=args.scale_min_log,
+                                                                glob_max_log=args.scale_max_log,
+                                                                buffer_frac=args.buffer_frac)(t_img)
+                            t_img = t_img.numpy()
+                        
+                        # -- Condition --
+                        if idx_cond is not None:
+                            c_img = data_plot[idx_cond][i].squeeze()
+                            if transform_back_bf_plot:
+                                if var == 'temp':
+                                    c_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                                std=args.scale_std)(c_img)
+                                elif var == 'prcp':
+                                    c_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                                glob_mean_log=args.scale_mean,
+                                                                glob_std_log=args.scale_std,
+                                                                glob_min_log=args.scale_min_log,
+                                                                glob_max_log=args.scale_max_log,
+                                                                buffer_frac=args.buffer_frac)(c_img)
+                            c_img = c_img.numpy()
+                        
+                        # -- Generated --
+                        g_img = data_plot[idx_gen][i].squeeze()
                         if transform_back_bf_plot:
-                            # If temperature, Z-score back transform
                             if var == 'temp':
-                                img = ZScoreBackTransform(mean=args.scale_mean, std=args.scale_std)(img)
-                            # If precipitation, log back transform
+                                g_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                            std=args.scale_std)(g_img)
                             elif var == 'prcp':
-                                img = PrcpLogBackTransform(min_log=args.scale_min_log, max_log=args.scale_max_log)(img)
+                                g_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                            glob_mean_log=args.scale_mean,
+                                                            glob_std_log=args.scale_std,
+                                                            glob_min_log=args.scale_min_log,
+                                                            glob_max_log=args.scale_max_log,
+                                                            buffer_frac=args.buffer_frac)(g_img)
+                        g_img = g_img.numpy()
 
-                        image = axs[0, i].imshow(img, cmap=cmap_name)
-                        axs[0, i].set_title(f'{data_names[-1]}')
+                        # 2) Determine local vmin, vmax across T, C, G for sample i
+                        tcg_list = []
+                        if t_img is not None:
+                            tcg_list.append(t_img)
+                        if c_img is not None:
+                            tcg_list.append(c_img)
+                        tcg_list.append(g_img)
+                        tcg_array = np.stack(tcg_list, axis=0)
+
+                        vmin_i = tcg_array.min()
+                        vmax_i = tcg_array.max()
+
+                        # 3) Plot row 0 (Generated)
+                        
+                        # Use plot_settings for cmap and local scaling
+                        cmap_ = plot_settings['Generated']['cmap']
+                        vmin_ = vmin_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmin']
+                        vmax_ = vmax_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmax']
+
+                        im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_)
+                        axs[0, i].set_title('Generated')
                         axs[0, i].axis('off')
-                        axs[0, i].set_ylim([0, img.shape[0]])
-                        fig.colorbar(image, ax=axs[0, i], fraction=0.046, pad=0.04, orientation='vertical')
+                        axs[0, i].set_ylim([0, g_img.shape[0]])
+                        fig.colorbar(im_g, ax=axs[0, i], fraction=0.046, pad=0.04, orientation='vertical')
 
-
-                    # Loop through the generated samples (and corresponding truth, condition, lsm and topo) and plot
-                    for i in range(n_gen_samples):
+                        # 4) Plot the rest of the data_plot in subsequent rows
                         for j in range(n_axs):
-                            img = data_plot[j][i].squeeze()
-                            if data_names[j] == 'Truth' or data_names[j] == 'Condition':
-                                cmap_name_use = cmap_name
-                                # If transform back before plotting is enabled, transform back (only for Truth and Condition)
-                                if transform_back_bf_plot:
-                                    # If temperature, Z-score back transform
-                                    if var == 'temp':
-                                        img = ZScoreBackTransform(mean=args.scale_mean, std=args.scale_std)(img)
-                                    # If precipitation, log back transform
-                                    elif var == 'prcp':
-                                        img = PrcpLogBackTransform(min_log=args.scale_min_log, max_log=args.scale_max_log)(img)
+                            dname = data_names[j]
+                            img_j = data_plot[j][i].squeeze()
 
+                            if dname in ['Truth', 'Condition']:
+                                if dname == 'Truth':
+                                    # If transformed im is available, use it.
+                                    if t_img is not None:
+                                        im_data = t_img
+                                    else:
+                                        im_data = img_j.numpy()
+                                else:
+                                    # If transformed im is available, use it.
+                                    if c_img is not None:
+                                        im_data = c_img
+                                    else:
+                                        im_data = img_j.numpy()
                             else:
-                                cmap_name_use = 'viridis'
+                                im_data = img_j.detach().cpu().numpy() if torch.is_tensor(img_j) else img_j
 
-                            
-                            image = axs[j+1, i].imshow(img, cmap=cmap_name_use)
-                            axs[j+1, i].set_title(f'{data_names[j]}')
+                            # Get settings from dictinory
+                            cmap_ = plot_settings[dname]['cmap']
+                            if plot_settings[dname]['use_local_scale']:
+                                vmin_ = vmin_i
+                                vmax_ = vmax_i
+                            else:
+                                vmin_ = plot_settings[dname]['vmin']
+                                vmax_ = plot_settings[dname]['vmax']
+
+                            im = axs[j+1, i].imshow(im_data, cmap=cmap_, vmin=vmin_, vmax=vmax_)
+                            axs[j+1, i].set_title(dname)
                             axs[j+1, i].axis('off')
-                            axs[j+1, i].set_ylim([0, img.shape[0]])
-                            fig.colorbar(image, ax=axs[j+1, i], fraction=0.046, pad=0.04)
+                            axs[j+1, i].set_ylim([0, im_data.shape[0]])
+                            fig.colorbar(im, ax=axs[j+1, i], fraction=0.046, pad=0.04)
+
 
                     fig.tight_layout()
                     if args.show_figs:

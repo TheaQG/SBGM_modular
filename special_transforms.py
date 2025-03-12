@@ -180,7 +180,7 @@ class PrcpLogTransform(object):
     '''
     def __init__(self,
                  eps=1e-10,
-                 scale_type='log_zscore', # 'log_zscore' or 'log01'
+                 scale_type='log_zscore', # 'log_zscore', 'log_01', 'log_minus1_1', 'log', 
                  glob_mean_log=None,
                  glob_std_log=None,
                  glob_min_log=None,
@@ -207,7 +207,7 @@ class PrcpLogTransform(object):
         if self.scale_type == 'log_zscore':
             if (self.glob_mean_log is None) or (self.glob_std_log is None):
                 raise ValueError("Global mean and standard deviation not provided. Using local statistics is not recommended.")
-        elif self.scale_type == 'log01':
+        elif self.scale_type == 'log_01':
             if (self.glob_min_log is None) or (self.glob_max_log is None):
                 raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
         elif self.scale_type == 'log_minus1_1':
@@ -237,7 +237,7 @@ class PrcpLogTransform(object):
         print(f"Min log in sample: {torch.min(log_sample)}")
         print(f"Max log in sample: {torch.max(log_sample)}")
         # Scale the log-transformed data to [0,1]ß
-        if self.scale_type == 'log01':
+        if self.scale_type == 'log_01':
             if (self.glob_min_log is None) or (self.glob_max_log is None):
                 # If the min and max log values are not provided, find them in the data
                 self.glob_min_log = torch.min(log_sample)
@@ -267,7 +267,7 @@ class PrcpLogTransform(object):
         elif self.scale_type == 'log':
             pass
         else:
-            raise ValueError("Invalid scale type. Please choose 'log01' or 'log_zscore' or 'log'.")
+            raise ValueError("Invalid scale type. Please choose 'log_01' or 'log_zscore' or 'log'.")
 
         return log_sample
     
@@ -278,7 +278,7 @@ class PrcpLogBackTransform(object):
     The data is back-transformed to the original distribution.
     '''
     def __init__(self,
-                 scale_type='log_zscore', # 'log_zscore' or 'log01'
+                 scale_type='log_zscore', # 'log_zscore', 'log_01', 'log_minus1_1'
                  glob_mean=None,
                  glob_std=None,
                  glob_min_log=None,
@@ -306,7 +306,7 @@ class PrcpLogBackTransform(object):
         if self.scale_type == 'log_zscore':
             if (self.glob_mean is None) or (self.glob_std is None):
                 raise ValueError("Global mean and standard deviation not provided. Using local statistics is not recommended.")
-        elif self.scale_type == 'log01':
+        elif self.scale_type == 'log_01':
             if (self.glob_min_log is None) or (self.glob_max_log is None):
                 raise ValueError("Min and max log values not provided. Using global statistics is recommended.")
         elif self.scale_type == 'log_minus1_1':
@@ -316,7 +316,7 @@ class PrcpLogBackTransform(object):
             pass
                 
         else:
-            raise ValueError("Invalid scale type. Please choose from ['log01', 'log_zscore', 'log_minus1_1', 'log'].")
+            raise ValueError("Invalid scale type. Please choose from ['log_01', 'log_zscore', 'log_minus1_1', 'log'].")
 
         pass
 
@@ -329,7 +329,7 @@ class PrcpLogBackTransform(object):
         if not isinstance(sample, torch.Tensor):
             sample = torch.tensor(sample, dtype=torch.float32)  # Ensure the input is a Tensor
 
-        if self.scale_type == 'log01':
+        if self.scale_type == 'log_01':
             # Back-transform the data to log-space
             log_sample = sample
             # Scale the log-transformed data back to the original range
@@ -351,6 +351,6 @@ class PrcpLogBackTransform(object):
         elif self.scale_type == 'log':
             back_transformed_sample = torch.exp(sample)
         else:
-            raise ValueError("Invalid scale type. Please choose from ['log01', 'log_zscore', 'log_minus1_1', 'log'].")
+            raise ValueError("Invalid scale type. Please choose from ['log_01', 'log_zscore', 'log_minus1_1', 'log'].")
 
         return back_transformed_sample

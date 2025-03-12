@@ -42,7 +42,7 @@ plt.rcParams.update({'savefig.dpi': 300})
 plt.rcParams.update({'savefig.bbox': 'tight'})
 
 # matplotlib.use('Agg') # For Linux
-from utils import str2bool
+from utils import str2bool, str2list_of_strings
 
 def data_stats_from_args():
     '''
@@ -60,7 +60,7 @@ def data_stats_from_args():
     parser.add_argument('--print_final_stats', type=str2bool, default=False, help='Whether to print the statistics')
     parser.add_argument('--fig_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_figures/', help='The path to save the figures')
     parser.add_argument('--stats_path', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_statistics', help='The path to save the statistics')
-    parser.add_argument('--transformations', nargs='+', default=None, help='List of transformations to apply to the data', choices=['zscore', 'log', 'log01', 'log_zscore'])
+    parser.add_argument('--transformations', type=str2list_of_strings, default=None, help='List of transformations to apply to the data')#, choices=['zscore', 'log', 'log01', 'log_minus1_1', 'log_zscore'])
     parser.add_argument('--show_only_transformed', type=str2bool, default=False, help='Whether to show only the transformed data')
     parser.add_argument('--time_agg', type=str, default='daily', choices=['daily', 'weekly', 'monthly'], help='Time aggregation for statistics (daily, weekly, monthly, yearly)')
     parser.add_argument('--n_workers', type=int, default=1, help='Number of workers to use for CPU multiprocessing')
@@ -112,9 +112,6 @@ class DataStats:
         self.split_type = split_type    # The split type of the data (train, val, test, all(DEVELOPMENT))
         self.path_data = path_data      # The path to the data
         self.create_figs = create_figs  # Whether to create figures
-        self.save_figs = save_figs      # Whether to save the figures
-        if self.save_figs:
-            self.transformation_str = '_'.join(self.transformations) if self.transformations else 'raw'
         self.show_figs = show_figs      # Whether to show the figures
         self.save_stats = save_stats    # Whether to save the statistics
         self.print_final_stats = print_final_stats  # Whether to print the statistics
@@ -125,6 +122,9 @@ class DataStats:
         self.time_agg = time_agg        # Time aggregation for statistics (daily, weekly, monthly, yearly)
         self.n_workers = n_workers      # How many CPU processes to spawn for multiprocessing
 
+        self.save_figs = save_figs      # Whether to save the figures
+        if self.save_figs:
+            self.transformation_str = '_'.join(self.transformations) if self.transformations else 'raw'
 
 
         # Set some plot and variable specific parameters
@@ -441,6 +441,15 @@ class DataStats:
                 mu = np.mean(data_log)
                 sigma = np.std(data_log) + 1e-8
                 transformed_data['log_zscore'] = (data_log - mu) / sigma
+            elif transform == 'log_minus1_1':
+                # Log transformation to [-1,1] range
+                data_log = np.log(data_1d + 1e-8)
+                data_log_max = np.max(data_log)
+                data_log_min = np.min(data_log)
+                # Normalize to [-1,1]
+                transformed_data['log_minus1_1'] = 2 * (data_log - data_log_min) / (data_log_max - data_log_min) - 1
+            else:
+                print(f"Transformation {transform} not implemented yet.")
             # Add more transformations as needed
 
         return transformed_data
@@ -603,38 +612,89 @@ class DataStats:
             else:
                 plt.close(fig)
 
-
         # 3) Global Distribution histograms (values)
         # For histograms of entire dataset, we need all in memory
         all_data_flat = np.concatenate(all_data_list, axis=0).flatten()
+        
         if self.create_figs:
-            # Original data histogram
-            fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+            fig, ax1 = plt.subplots(1, 1, figsize=(8, 5))
+            ax2 = ax1.twinx()  # second y-axis for transformed data
+
+            max_freq_original = 0
+            max_freq_transformed = 0
+            color_orig = 'C0'
+            color_trans = 'C1'
+            # Plot original data on the left y-axis (ax1) with a unique color
             if not self.show_only_transformed:
                 mu = np.mean(all_data_flat)
                 std = np.std(all_data_flat)
                 label_orig = f'Original, mu={mu:.2f}, std={std:.2f}'
-                ax.hist(all_data_flat, bins=100, alpha=0.7, label=label_orig)
+                n1, bins1, patches1 = ax1.hist(
+                    all_data_flat, bins=100, alpha=0.7, label=label_orig, color=color_orig
+                )
+                max_freq_original = n1.max()  # track max frequency for original distribution
+                print(f"Max frequency for original: {max_freq_original}")
+            min_global = np.min(all_data_flat)
+            max_global = np.max(all_data_flat)
 
-            # Transformed data histograms
+            min_x = min_global - 0.05 * np.abs(min_global)
+            max_x = max_global + 0.05 * np.abs(max_global)
+            # Plot transformed data on the right y-axis (ax2), track max frequencies
             transformed_data = self.apply_transformations(all_data_flat)
             for key, arr in transformed_data.items():
                 mu_t = np.mean(arr)
                 std_t = np.std(arr)
+                max_t = np.max(arr)
+                min_t = np.min(arr)
                 label_t = f'{key.capitalize()} Transformed, mu={mu_t:.2f}, std={std_t:.2f}'
-                ax.hist(arr, bins=100, alpha=0.7, label=label_t)
+                n2, bins2, patches2 = ax2.hist(
+                    arr, bins=100, alpha=0.7, label=label_t, color=color_trans
+                )
+                if n2.max() > max_freq_transformed:
+                    max_freq_transformed = n2.max()
+                    print(f"Max frequency for {key} transformed: {max_freq_transformed}")
 
-            ax.set_title(f"Global Distribution - {self.data_type} {self.var.capitalize()}, {self.split_type}")
+                # If min/max is different, adjust x-limits
+                if min_t < min_x:
+                    min_x = min_t - 0.05 * np.abs(min_t)
+                if max_t > max_x:
+                    max_x = max_t + 0.05 * np.abs(max_t)
+
+            # Apply y-limits based on max frequency for each distribution
+            # if max_freq_original > 0:
+            #     ax1.set_ylim([0, max_freq_original * 1.5])
+            # if max_freq_transformed > 0:
+            #     ax2.set_ylim([0, max_freq_transformed * 1.5])
+
+            # Title and labels
+            ax1.set_title(f"Global Distribution - {self.data_type} {self.var.capitalize()}, {self.split_type}")
             if self.var == 'temp':
-                ax.set_xlabel('Temperature [C]')
+                ax1.set_xlabel('Temperature [C]')
+                ax1.set_xlim([min_x, max_x])
             elif self.var == 'prcp':
-                ax.set_xlabel('Precipitation [mm]')
+                ax1.set_xlabel('Precipitation [mm]')
+                ax1.set_xlim([min_x, max_x])
                 # IMPLEMENT MORE VARIABLES HERE
-            ax.set_ylabel('Frequency')
-            ax.legend()
-            # If transformation 'log', set y-scale to log
-            if any([t in self.transformations for t in ['log', 'log01', 'log_zscore']]):
-                ax.set_yscale('log')
+            
+            
+            # Y-labels and axis color to match histograms
+            ax1.set_ylabel('Frequency (Original)', color=color_orig)
+            ax1.tick_params(axis='y', labelcolor=color_orig)
+            ax1.spines['left'].set_color(color_orig)
+
+            ax2.set_ylabel('Frequency (Transformed)', color=color_trans)
+            ax2.tick_params(axis='y', labelcolor=color_trans)
+            ax2.spines['right'].set_color(color_trans)
+
+            # Combine legends from both axes
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='best')
+
+            # If transformation any type of 'log', set right y-scale to log (search self.transformations strings for 'log')
+            if any([t in self.transformations for t in ['log', 'log01', 'log_zscore', 'log_minus1_1']]):
+                ax2.set_yscale('log')
+                ax1.set_yscale('log')
 
             if self.save_figs:
                 out_path = os.path.join(self.fig_path, f'{self.var}_{self.split_type}_{self.data_type}_{self.transformation_str}_all_data.png')
@@ -646,6 +706,7 @@ class DataStats:
                 plt.close(fig)
             else:
                 plt.close(fig)
+            plt.show()
 
 
         # 4) Global Distribution histograms (daily stats, mean, std_dev, etc.)

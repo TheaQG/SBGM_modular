@@ -32,7 +32,7 @@ def launch_test_dataset_from_args():
     parser.add_argument('--scaling', type=str2bool, default=False, help='Whether to scale the data')
     parser.add_argument('--scale_mean', type=float, default=8.69251, help='Mean of OG data distribution (Temperature [C])')
     parser.add_argument('--scale_std', type=float, default=6.192434, help='STD of OG data distribution (Temperature [C])')
-    parser.add_argument('--scale_type_prcp', type=str, default='log_zscore', help='Type of scaling for precipitation', choices=['log_zscore', 'log01', 'log', 'log_minus1_1'])
+    parser.add_argument('--scale_type_prcp', type=str, default='log_zscore', help='Type of scaling for precipitation', choices=['log_zscore', 'log_01', 'log', 'log_minus1_1', 'log_zscore'])
     parser.add_argument('--scale_mean_log', type=float, default=-25.0, help='Mean of log-transformed data distribution (Precipitation [mm])')
     parser.add_argument('--scale_std_log', type=float, default=10.0, help='STD of log-transformed data distribution (Precipitation [mm])')
     parser.add_argument('--scale_min', type=float, default=0, help='Minimum of OG data distribution (Precipitation [mm])')
@@ -43,9 +43,9 @@ def launch_test_dataset_from_args():
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
-    parser.add_argument('--show_both_orig_scaled', type=str2bool, default=False, help='Whether to show both the original and scaled data in the same figure')
+    parser.add_argument('--show_both_orig_scaled', type=str2bool, default=True, help='Whether to show both the original and scaled data in the same figure')
     parser.add_argument('--show_ocean', type=str2bool, default=False, help='Whether to show the ocean')
-    parser.add_argument('--path_save', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/PhD_AU_material/Figures/', help='The path to save the figures')
+    parser.add_argument('--path_save', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/data_figures/', help='The path to save the figures')
     parser.add_argument('--cutout_domains', type=str2list, default=[170, 170+180, 340, 340+180], help='The cutout domains')
     parser.add_argument('--topo_min', type=int, default=-12, help='The minimum value of the topological data')
     parser.add_argument('--topo_max', type=int, default=330, help='The maximum value of the topological data')
@@ -106,7 +106,6 @@ def test_dataset(args):
     data_dir_era5_zarr = args.path_data + 'data_ERA5/size_589x789/' + var + '_589x789/zarr_files/test.zarr'
 
     # Set path to save figures
-    SAVE_FIGS = args.save_figs
     PATH_SAVE = args.path_save
 
     # Set number of samples and cache size
@@ -187,7 +186,6 @@ def test_dataset(args):
     n_samples = args.n_gen_samples
     idxs = random.sample(range(0, len(dataset)), n_samples)
 
-    # --- BEGIN NEW ORDER SETUP ---
     # Build a fixed order of subplots:
     # ['img', 'img_cond', 'img_original', 'img_cond_original'] if show_both_orig_scaled
     # or ['img', 'img_cond'] if show_both_orig_scaled = False
@@ -216,7 +214,7 @@ def test_dataset(args):
 
     # If show_both_orig_scaled, we then add 'img_original' 
     # (and 'img_cond_original' if sample_w_cond_img)
-    if show_both_orig_scaled:
+    if show_both_orig_scaled and scaling:
         n_subplots += 1
         img_strs.append('img_original')
         cmaps.append(cmap_name)
@@ -249,60 +247,6 @@ def test_dataset(args):
         cmaps.append('coolwarm')
         cmaps_label.append('')
         img_labels.append('SDF')
-    # --- END NEW ORDER SETUP ---
-    # # Figure out how many subplots are needed
-    # n_subplots = 1 # For HR image
-    # img_strs = ['img']
-    # cmaps = [cmap_name]
-    # cmaps_label = [cmap_label]
-
-    # if scaling:
-    #     img_labels = ['HR DANRA, scaled']
-    # else:
-    #     img_labels = ['HR DANRA, unscaled']
-
-    # # If show both original and scaled data, add one subplot for each
-    # if show_both_orig_scaled:
-    #     n_subplots += 1
-    #     img_strs.append('img_original')
-    #     cmaps.append(cmap_name)
-    #     cmaps_label.append(cmap_label)
-    #     img_labels.append('HR DANRA, original')
-
-    # if sample_w_cond_img:
-    #     n_subplots += 1
-    #     img_strs.append('img_cond')
-    #     cmaps.append(cmap_name)
-    #     cmaps_label.append(cmap_label)
-    #     if scaling:
-    #         img_labels.append('LR ERA5, scaled')
-    #     else:
-    #         img_labels.append('LR ERA5, unscaled')
-    #     # If show both original and scaled data, add one subplot for each
-    #     if show_both_orig_scaled:
-    #         n_subplots += 1
-    #         img_strs.append('img_cond_original')
-    #         cmaps.append(cmap_name)
-    #         cmaps_label.append(cmap_label)
-    #         img_labels.append('LR ERA5, original')
-    
-    # if sample_w_lsm_topo:
-    #     n_subplots += 2
-    #     img_strs.append('topo')
-    #     cmaps.append('terrain')
-    #     cmaps_label.append('')
-    #     img_labels.append('Topography')
-
-    #     img_strs.append('lsm')
-    #     cmaps.append('binary')
-    #     cmaps_label.append('')
-    #     img_labels.append('Land-sea mask')
-    # if sample_w_sdf:
-    #     n_subplots += 1
-    #     img_strs.append('sdf')
-    #     cmaps.append('coolwarm')
-    #     cmaps_label.append('')
-    #     img_labels.append('SDF')
 
 
     if args.show_figs or args.save_figs:
@@ -322,9 +266,13 @@ def test_dataset(args):
     vmin_img_original = float('inf')
     vmax_img_original = float('-inf')
 
-    # Fixed min/max for topo and sdf
-    vmin_topo = 0#args.topo_min # wrong, makes DK completely flat
-    vmax_topo = 1 #args.topo_max 
+    # Fixed min/max for topo and sdf (dependent on scaling)
+    if args.scaling:
+        vmin_topo = 0
+        vmax_topo = 1
+    else:
+        vmin_topo = 0#args.topo_min # wrong, makes DK completely flat
+        vmax_topo = args.topo_max 
     vmin_sdf = 0
     vmax_sdf = 1
 
@@ -341,7 +289,7 @@ def test_dataset(args):
         print('vmax_img: ', vmax_img)
 
         # If 'img_original' and 'img_cond_original' are in sample_full, get min and max values for colorbar
-        if show_both_orig_scaled:
+        if show_both_orig_scaled and scaling:
             vmin_img_original = min(vmin_img_original, sample_full['img_original'].min(), sample_full['img_cond_original'].min())
             vmax_img_original = max(vmax_img_original, sample_full['img_original'].max(), sample_full['img_cond_original'].max())
             print('vmin_img_original: ', vmin_img_original)
@@ -391,10 +339,10 @@ def test_dataset(args):
                     # Set some boxplot properties
                     flierprops = dict(marker='o', markerfacecolor='none', markersize=2, linestyle='none', markeredgecolor='darkgreen', alpha=0.4)
                     medianprops = dict(linestyle='-', linewidth=2, color='black')
-                    meanlineprops = dict(linestyle=':', linewidth=2, color='firebrick')
+                    # meanlineprops = dict(linestyle=':', linewidth=2, color='firebrick')
                     meanpointprops = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
                     
-                    # Boxplot of pixel values
+                    # Boxplot of pixel values (excluding NaNs, i.e. ocean)
                     img_data_bp = img_data[~np.isnan(img_data)].flatten()
                     bax.boxplot(img_data_bp,
                                 vert=True,
@@ -429,7 +377,7 @@ def test_dataset(args):
                 fn = f'Dataset_{var}_ZScoreScaled'
                 fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
             elif var == 'prcp':
-                fn = f'Dataset_{var}_logscaled'
+                fn = f'Dataset_{var}_{args.scale_type_prcp}'
                 fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
             print(f'with name {fn}')
         else:
