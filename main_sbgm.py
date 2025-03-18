@@ -7,6 +7,7 @@ import numpy as np
 
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Import objects from other files in this repository
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
@@ -673,6 +674,18 @@ def main_sbgm(args):
                                                             buffer_frac=args.buffer_frac)(g_img)
                         g_img = g_img.numpy()
 
+                        # If ocean hidden, mask out in images THEN compute vmin, vmax
+                        if (not args.show_ocean) and ('LSM' in data_names):
+                            idx_lsm = data_names.index('LSM')
+                            lsm_img_ = data_plot[idx_lsm][i].squeeze()
+                            lsm_img = lsm_img_.numpy() if torch.is_tensor(lsm_img_) else lsm_img_
+                            # Where lsm_img < 0.5, set to nan
+                            if t_img is not None:
+                                t_img = np.where(lsm_img < 0.5, np.nan, t_img)
+                            if c_img is not None:
+                                c_img = np.where(lsm_img < 0.5, np.nan, c_img)
+                            g_img = np.where(lsm_img < 0.5, np.nan, g_img)
+
                         # 2) Determine local vmin, vmax across T, C, G for sample i
                         tcg_list = []
                         if t_img is not None:
@@ -682,42 +695,74 @@ def main_sbgm(args):
                         tcg_list.append(g_img)
                         tcg_array = np.stack(tcg_list, axis=0)
 
-                        vmin_i = tcg_array.min()
-                        vmax_i = tcg_array.max()
+                        # Get non-nan min/max
+                        vmin_i = np.nanmin(tcg_array)
+                        vmax_i = np.nanmax(tcg_array)
+                        print(f'vmin: {vmin_i}, vmax: {vmax_i}')
 
                         # 3) Plot row 0 (Generated)
                         
+                        # Create Axes divider for the top row (to allow for boxplot)
+                        divider = make_axes_locatable(axs[0, i])
+                        bax = divider.append_axes('right', size='10%', pad=0.1)
+                        cax = divider.append_axes('right', size='5%', pad=0.1)
+
                         # Use plot_settings for cmap and local scaling
                         cmap_ = plot_settings['Generated']['cmap']
                         vmin_ = vmin_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmin']
                         vmax_ = vmax_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmax']
 
-                        im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_)
+                        im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
                         axs[0, i].set_title('Generated')
                         axs[0, i].axis('off')
                         axs[0, i].set_ylim([0, g_img.shape[0]])
-                        fig.colorbar(im_g, ax=axs[0, i], fraction=0.046, pad=0.04, orientation='vertical')
+                        
+                        # Colorbar on cax
+                        fig.colorbar(im_g, cax=cax)#, fraction=0.046, pad=0.04, orientation='vertical')
+
+                        # Boxplot on bax (exclude NaNs if ocean is masked)
+                        g_data_bp = g_img[~np.isnan(g_img)].flatten()
+
+                        mean_props = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+                        median_props = dict(linestyle='-', linewidth=2, color='black')
+                        flier_props = dict(marker='o', markerfacecolor='none', markersize=2, markeredgecolor='darkgreen', alpha=0.4)
+                        
+                        bax.boxplot(g_data_bp,
+                                    vert=True,
+                                    widths=2,
+                                    showmeans=True,
+                                    meanprops=mean_props,
+                                    medianprops=median_props,
+                                    flierprops=flier_props,
+                                    )
+                        bax.set_xticks([])
+                        bax.set_yticks([])
+                        bax.set_frame_on(False)
+                        
+
 
                         # 4) Plot the rest of the data_plot in subsequent rows
                         for j in range(n_axs):
                             dname = data_names[j]
-                            img_j = data_plot[j][i].squeeze()
+                            img_j_ = data_plot[j][i].squeeze()
+                            arr_np = img_j_.numpy() if torch.is_tensor(img_j_) else img_j_
 
-                            if dname in ['Truth', 'Condition']:
-                                if dname == 'Truth':
-                                    # If transformed im is available, use it.
-                                    if t_img is not None:
-                                        im_data = t_img
-                                    else:
-                                        im_data = img_j.numpy()
-                                else:
-                                    # If transformed im is available, use it.
-                                    if c_img is not None:
-                                        im_data = c_img
-                                    else:
-                                        im_data = img_j.numpy()
+                            # If T or C present, reuse backtransformed and masked data
+                            if dname == 'Truth' and t_img is not None:
+                                arr_np = t_img
+                            elif dname == 'Condition' and c_img is not None:
+                                arr_np = c_img
+                            
+                            divider = make_axes_locatable(axs[j+1, i])
+
+                            # If T, C or G, do boxplot + colorbar
+                            if dname in ['Truth', 'Condition', 'Generated']:
+                                bax = divider.append_axes('right', size='10%', pad=0.1)
+                                cax = divider.append_axes('right', size='5%', pad=0.1)
                             else:
-                                im_data = img_j.detach().cpu().numpy() if torch.is_tensor(img_j) else img_j
+                                # only colorbar
+                                bax = None
+                                cax = divider.append_axes('right', size='5%', pad=0.1)
 
                             # Get settings from dictinory
                             cmap_ = plot_settings[dname]['cmap']
@@ -728,11 +773,26 @@ def main_sbgm(args):
                                 vmin_ = plot_settings[dname]['vmin']
                                 vmax_ = plot_settings[dname]['vmax']
 
-                            im = axs[j+1, i].imshow(im_data, cmap=cmap_, vmin=vmin_, vmax=vmax_)
+
+                            im_ = axs[j+1, i].imshow(arr_np, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
                             axs[j+1, i].set_title(dname)
                             axs[j+1, i].axis('off')
-                            axs[j+1, i].set_ylim([0, im_data.shape[0]])
-                            fig.colorbar(im, ax=axs[j+1, i], fraction=0.046, pad=0.04)
+                            axs[j+1, i].set_ylim([0, arr_np.shape[0]])
+                            fig.colorbar(im_, cax=cax)#, fraction=0.046, pad=0.04)
+
+                            if dname in ['Truth', 'Condition', 'Generated']:
+                                arr_bp = arr_np[~np.isnan(arr_np)].flatten()
+                                bax.boxplot(arr_bp,
+                                            vert=True,
+                                            widths=2,
+                                            showmeans=True,
+                                            meanprops=mean_props,
+                                            medianprops=median_props,
+                                            flierprops=flier_props
+                                            )
+                                bax.set_xticks([])
+                                bax.set_yticks([])
+                                bax.set_frame_on(False)
 
 
                     fig.tight_layout()
@@ -743,10 +803,10 @@ def main_sbgm(args):
                     # Save figure
                     if args.save_figs:
                         if epoch == (epochs - 1):
-                            fig.savefig(PATH_FIGURES + NAME_FINAL_SAMPLES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+                            fig.savefig(PATH_FIGURES + NAME_FINAL_SAMPLES + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
                             print(f'Saving final generated sample in {PATH_SAMPLES} as {NAME_FINAL_SAMPLES}.png')
                         else:
-                            fig.savefig(PATH_FIGURES + NAME_SAMPLES + str(epoch+1) + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+                            fig.savefig(PATH_FIGURES + NAME_SAMPLES + str(epoch+1) + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
                             print(f'Saving generated samples in {PATH_FIGURES} as {NAME_SAMPLES}{epoch+1}.png')
                     
                     break
