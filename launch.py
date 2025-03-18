@@ -62,6 +62,7 @@ def launch_from_args():
     parser.add_argument('--show_figs', type=str2bool, default=False, help='Whether to show the figures')
     parser.add_argument('--show_both_orig_scaled', type=str2bool, default=False, help='Whether to show both the original and scaled data')
     parser.add_argument('--transform_back_bf_plot', type=str2bool, default=True, help='Whether to transform back before plotting')
+    parser.add_argument('--show_ocean', type=str2bool, default=False, help='Whether to show the ocean pixels in plots')
     parser.add_argument('--epochs', type=int, default=500, help='The number of epochs')
     parser.add_argument('--batch_size', type=int, default=16, help='The batch size')
     parser.add_argument('--last_fmap_channels', type=int, default=512, help='The number of channels in the last feature map')
