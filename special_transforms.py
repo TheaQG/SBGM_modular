@@ -216,7 +216,7 @@ class PrcpLogTransform(object):
         elif self.scale_type == 'log':
             pass
         else:
-            raise ValueError("Invalid scale type. Please choose '01' or 'ZScore'.")
+            raise ValueError("Invalid scale type. Please choose '01' or 'zscore'.")
         
         pass
 
@@ -234,8 +234,8 @@ class PrcpLogTransform(object):
         # Log-transform the sample
         log_sample = torch.log(sample + self.eps) # Add a small epsilon to avoid log(0)
 
-        print(f"Min log in sample: {torch.min(log_sample)}")
-        print(f"Max log in sample: {torch.max(log_sample)}")
+        # print(f"Min log in sample: {torch.min(log_sample)}")
+        # print(f"Max log in sample: {torch.max(log_sample)}")
         # Scale the log-transformed data to [0,1]ß
         if self.scale_type == 'log_01':
             if (self.glob_min_log is None) or (self.glob_max_log is None):
@@ -262,7 +262,7 @@ class PrcpLogTransform(object):
             print(f"Max log in sample (zscore): {torch.max(log_sample)}")
         elif self.scale_type == 'log_minus1_1':
             # Scale the log-transformed data to [-1, 1]
-            log_sample = 2 * (log_sample - self.glob_min_log) / (self.glob_max_log - self.glob_min_log) - 1
+            log_sample = 2 * ((log_sample - self.glob_min_log) / (self.glob_max_log - self.glob_min_log)) - 1
 
         elif self.scale_type == 'log':
             pass
