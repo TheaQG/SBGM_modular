@@ -216,7 +216,7 @@ class PrcpLogTransform(object):
         elif self.scale_type == 'log':
             pass
         else:
-            raise ValueError("Invalid scale type. Please choose '01' or 'ZScore'.")
+            raise ValueError("Invalid scale type. Please choose '01' or 'zscore'.")
         
         pass
 

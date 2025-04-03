@@ -26,6 +26,7 @@ import argparse
 import torch 
 import zarr
 import os
+import json
 
 import netCDF4 as nc
 import torch.nn as nn
@@ -414,16 +415,50 @@ def str2bool(v):
     
 
 def str2list(v):
-    '''
-        Function to convert string to list.
-        Used for argparse.
-    '''
-    try:
-        # Try to split commas and convert each part to an integer
-        return [int(i) for i in v.split(',')]
-    except:
-        # If there is a ValueError, it means the list contains floats or strings
-        return [float(x) if '.' in x else x for x in v.split(',')]
+    """
+    Convert a string to a list.
+    If the string is in JSON list format (begins with '[' and ends with ']'),
+    this function uses json.loads to parse it. Otherwise, it splits the string
+    on commas and tries to convert each element to an integer, then float,
+    and if neither conversion applies, leaves it as a string.
+    
+    Examples:
+      - '[1,2,3]' --> [1, 2, 3]
+      - '1,2,3'   --> [1, 2, 3]
+      - '["a", "b", "c"]' --> ["a", "b", "c"]
+      - '1.1,2.2,3.3' --> [1.1, 2.2, 3.3]
+    """
+    v = v.strip()
+    if v.startswith('[') and v.endswith(']'):
+        try:
+            return json.loads(v)
+        except Exception:
+            # If JSON loading fails, fallback to splitting
+            pass
+    # Fallback: split on commas and try to convert each element.
+    items = [x.strip() for x in v.split(',')]
+    result = []
+    for x in items:
+        try:
+            result.append(int(x))
+        except ValueError:
+            try:
+                result.append(float(x))
+            except ValueError:
+                result.append(x)
+    return result    
+
+# def str2list(v):
+#     '''
+#         Function to convert string to list.
+#         Used for argparse.
+#     '''
+#     try:
+#         # Try to split commas and convert each part to an integer
+#         return [int(i) for i in v.split(',')]
+#     except:
+#         # If there is a ValueError, it means the list contains floats or strings
+#         return [float(x) if '.' in x else x for x in v.split(',')]
     
 
 def str2list_of_strings(v):
