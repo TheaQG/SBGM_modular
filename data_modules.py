@@ -802,6 +802,14 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         # Save new LR parameters
         self.lr_data_size = lr_data_size
         self.lr_cutout_domains = lr_cutout_domains
+        print(self.lr_cutout_domains)
+        # Check whether lr_cutout_domains are parsed as a list or tuple - even if 'None' - and set correctly to None if not
+        if isinstance(self.lr_cutout_domains, list) or isinstance(self.lr_cutout_domains, tuple):
+            if len(self.lr_cutout_domains) == 0 or (len(self.lr_cutout_domains) == 1 and str(self.lr_cutout_domains[0]).lower() == 'none'):
+                self.lr_cutout_domains = None
+            else:
+                self.lr_cutout_domains = self.lr_cutout_domains
+        print(self.lr_cutout_domains)
         # Specify target LR size (if different from HR size)
         self.target_lr_size = self.lr_data_size if self.lr_data_size is not None else self.data_size
 
@@ -1065,12 +1073,19 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         if self.cutouts:
             # hr_point is computed using HR cutout domain and HR data size
             hr_point = find_rand_points(self.cutout_domains, self.data_size)
-            # For LR conditions, if lr_data_size and separate LR cutout domains are provided, use them
-            if self.lr_data_size is not None and self.lr_cutout_domains is not None:
-                lr_point = find_rand_points(self.lr_cutout_domains, self.lr_data_size)
+            if self.lr_data_size is not None:
+                # If a separate LR cutout domain is provided, use it
+                print(self.lr_cutout_domains)
+                if self.lr_cutout_domains is not None:
+                    lr_point = find_rand_points(self.lr_cutout_domains, self.target_lr_size)
+                else:
+                    # Otherwise default to the same cutout point as HR
+                    lr_point = hr_point
             else:
-                lr_point = hr_point # We will use random crop later
+                # If no LR data size is provided, use the same cutout point as HR
+                lr_point = hr_point
         else:
+            # If cutouts are not used, set points to None and use full domain
             hr_point = None
             lr_point = None
 

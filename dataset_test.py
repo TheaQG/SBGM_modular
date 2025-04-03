@@ -1,9 +1,16 @@
 '''
     Test the dataset class
+    - Make a specific plotting function, using the layout developed in dataset_test.py, that I can employ across multiple files to have a consistent figure layout. Now, this is especially when I start generating results from my model (i.e. HR generated variable fields to compare with the HR truth). This means that the function must be able to either plot just the dataset (as for the previously written functionality), but also the dataset ALONG with the generated fields. 
+- Employ the changes in the data_modules to the other scripts in my repo - especially in the main_sbgm.py, that I have written.
+
+I want to start with developing the plotting function, and here is the codes that I need to align the plotting in:
+dataset_test.py:
+
 '''
 import zarr 
 import random
 import argparse
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -102,6 +109,7 @@ def launch_test_dataset_from_args():
     parser.add_argument('--scaling', type=str2bool, default=True, help='Whether to scale the data')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
+    parser.add_argument('--specific_fig_name', type=str, default=None, help='If not None, saves figure with this name')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
     parser.add_argument('--show_both_orig_scaled', type=str2bool, default=False, help='Whether to show both the original and scaled data in the same figure')
     parser.add_argument('--show_geo', type=str2bool, default=False, help='Whether to show the geo variables when plotting')
@@ -717,10 +725,13 @@ def test_dataset(args):
     # Save the figure
     if args.save_figs:
         print(f'Saving figure to {PATH_SAVE}')
-        if scaling:
-            fn = f'Dataset_{hr_var}_{hr_scaling_method}'
+        if args.specific_fig_name is not None:
+            fn = args.specific_fig_name
         else:
-            fn = f'Dataset_{hr_var}_unscaled'
+            if scaling:
+                fn = f'Dataset_{hr_var}_{hr_scaling_method}'
+            else:
+                fn = f'Dataset_{hr_var}_unscaled'
         fig.savefig(PATH_SAVE + fn + '.png', dpi=300, bbox_inches='tight')
         print(f'with name {fn}')
 
