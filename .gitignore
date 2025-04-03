@@ -6,3 +6,7 @@
 .DS_Store
 # Ignore .pyc files
 *.pyc
+# Ignore .npz files (for now)
+*.npz
+# Ignore the logs
+/logs

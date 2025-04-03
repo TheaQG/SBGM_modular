@@ -7,6 +7,7 @@ import numpy as np
 
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Import objects from other files in this repository
 from data_modules import DANRA_Dataset_cutouts_ERA5_Zarr
@@ -44,10 +45,12 @@ def main_sbgm(args):
         print(f'Warning: HR_VAR: {var} is not the same as LR_VARS[0]: {lr_vars[0]}. Setting LR_VARS[0] to HR_VAR')
         lr_vars[0] = var
 
-
     # Set scaling to true or false
     scaling = args.scaling
     noise_variance = args.noise_variance
+
+    # Define wether to transform data back from normalization/log-space before plotting
+    transform_back_bf_plot = args.transform_back_bf_plot
 
     # Set some color map settings
     if var == 'temp':
@@ -269,39 +272,57 @@ def main_sbgm(args):
     
     # Define training dataset, with cutouts enabled and data from zarr files
     train_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_train_w_cutouts_zarr, 
-                                            data_size = image_dim, 
-                                            n_samples = n_samples_train, 
-                                            cache_size = cache_size_train, 
+                                            data_size=image_dim, 
+                                            n_samples=n_samples_train, 
+                                            cache_size=cache_size_train, 
                                             variable=var,
+                                            shuffle=False,
+                                            cutouts=CUTOUTS, 
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_train,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss=use_sdf_weighted_loss,
                                             scale=scaling, 
-                                            scale_mean=8.69251,
-                                            scale_std=6.192434,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons,
                                             conditional_images=condition_on_img,
                                             cond_dir_zarr=data_dir_era5_train_zarr, 
-                                            n_classes=n_seasons, 
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
+                                            n_classes=n_seasons
                                             )
     # Define validation dataset, with cutouts enabled and data from zarr files
     valid_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_valid_w_cutouts_zarr, 
-                                            data_size = image_dim, 
-                                            n_samples = n_samples_valid, 
-                                            cache_size = cache_size_valid, 
+                                            data_size=image_dim, 
+                                            n_samples=n_samples_valid, 
+                                            cache_size=cache_size_valid, 
                                             variable=var,
+                                            shuffle=False,
+                                            cutouts=CUTOUTS, 
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_valid,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss=use_sdf_weighted_loss,
                                             scale=scaling,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons, 
                                             conditional_images=condition_on_img,
                                             cond_dir_zarr=data_dir_era5_valid_zarr,
                                             n_classes=n_seasons, 
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
                                             )
     # Define test dataset, with cutouts enabled and data from zarr files
     gen_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_test_w_cutouts_zarr,
@@ -309,17 +330,26 @@ def main_sbgm(args):
                                             n_samples = n_samples_test,
                                             cache_size = cache_size_test,
                                             variable=var,
-                                            scale=scaling,
                                             shuffle=True,
+                                            cutouts=CUTOUTS,
+                                            cutout_domains=CUTOUT_DOMAINS,
+                                            n_samples_w_cutouts=n_samples_test,
+                                            lsm_full_domain=data_lsm,
+                                            topo_full_domain=data_topo,
+                                            sdf_weighted_loss = use_sdf_weighted_loss,
+                                            scale=scaling,
+                                            save_original=args.show_both_orig_scaled,
+                                            scale_mean=args.scale_mean,
+                                            scale_std=args.scale_std,
+                                            scale_min=args.scale_min,
+                                            scale_max=args.scale_max,
+                                            scale_min_log=args.scale_min_log,
+                                            scale_max_log=args.scale_max_log,
+                                            buffer_frac=args.buffer_frac,
                                             conditional_seasons=condition_on_seasons, 
                                             conditional_images=condition_on_img,    
                                             cond_dir_zarr=data_dir_era5_test_zarr,
                                             n_classes=n_seasons,
-                                            cutouts=CUTOUTS,
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss
                                             )
 
 
@@ -454,6 +484,27 @@ def main_sbgm(args):
         # Print the training and validation losses
         print(f'\n\n\nTraining loss: {train_loss:.6f}')
         print(f'Validation loss: {valid_loss:.6f}\n\n\n')
+        
+        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_train', 'wb') as fp:
+            pickle.dump(train_losses, fp)
+        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_valid', 'wb') as fp:
+            pickle.dump(valid_losses, fp)
+
+        if args.create_figs:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+            ax.plot(train_losses, label='Train')
+            ax.plot(valid_losses, label='Validation')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.set_title('Loss')
+            ax.legend(loc='upper right')
+            fig.tight_layout()
+            if args.show_figs:
+                plt.show()
+                
+            if args.save_figs:
+                fig.savefig(PATH_FIGURES + NAME_LOSSES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+
 
         # If validation loss is lower than best loss, save the model. With possibility of early stopping
         if valid_loss < best_loss:
@@ -464,6 +515,11 @@ def main_sbgm(args):
 
             # If create figures is enabled, create figures
             if args.create_figs and n_gen_samples > 0 and epoch % args.plot_interval == 0:
+                if var == 'temp':
+                    cmap_var_name = 'plasma'
+                elif var == 'prcp':
+                    cmap_var_name = 'inferno'
+
                 if epoch == 0:
                     print('First epoch, generating samples...')
                 else:
@@ -482,6 +538,29 @@ def main_sbgm(args):
                 pipeline.model.load_state_dict(best_model_state)
                 # Set model to evaluation mode (remember to set back to training mode after generating samples)
                 pipeline.model.eval()
+
+                # Set topography, lsm and sdf vmin and vmax for colorbars 
+                lsm_vmin = 0
+                lsm_vmax = 1
+                sdf_vmin = 0
+                sdf_vmax = 1
+                # Set topo based on scaling or not
+                if scaling:
+                    topo_vmin = 1
+                    topo_vmax = 0
+                else:
+                    topo_vmin = -12
+                    topo_vmax = 300
+                
+                # Setup dictionary with plotting specifics for each variable
+                plot_settings = {
+                    'Truth': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Condition': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Generated': {'cmap': cmap_var_name, 'use_local_scale': True, 'vmin': None, 'vmax': None},
+                    'Topography': {'cmap': 'terrain', 'use_local_scale': False, 'vmin': topo_vmin, 'vmax': topo_vmax},
+                    'LSM': {'cmap': 'binary', 'use_local_scale': False, 'vmin': lsm_vmin, 'vmax': lsm_vmax},
+                    'SDF': {'cmap': 'coolwarm', 'use_local_scale': False, 'vmin': sdf_vmin, 'vmax': sdf_vmax},
+                }
 
                 for idx, samples in tqdm.tqdm(enumerate(gen_dataloader), total=len(gen_dataloader)):
                     sample_batch_size = n_gen_samples
@@ -521,37 +600,200 @@ def main_sbgm(args):
                                                 ).squeeze()
                     generated_samples = generated_samples.detach().cpu()
 
-                    # Add generated samples to data_plot and data_names
+                    # Append generated samples to data_plot and data_names
                     data_plot.append(generated_samples)
                     data_names.append('Generated')
-                    
 
-                    # Plotting truth, condition, generated, lsm and topo for n different test images
-                    fig, axs = plt.subplots(n_axs+1, n_gen_samples, figsize=(14,9)) 
-                    
-                    # Make the first row the generated images
+                    # -----------------------------------------------------------
+                    # Create figure and axes
+                    # -----------------------------------------------------------
+                    fig, axs = plt.subplots(n_axs + 1, n_gen_samples, figsize=(n_axs*4, n_gen_samples*4))
+
+                    # -----------------------------------------------------------
+                    # For each sample i, find local min/max for T, C and G only
+                    # -----------------------------------------------------------
                     for i in range(n_gen_samples):
-                        img = data_plot[-1][i].squeeze()
-                        image = axs[0, i].imshow(img, cmap=cmap_name)
-                        axs[0, i].set_title(f'{data_names[-1]}')
+                        # 1) Gather and (if necessary) back-transform single-sample images
+                        t_img, c_img, g_img = None, None, None
+
+                        # Indices in data_plot/dat_names
+                        try:
+                            idx_truth = data_names.index('Truth')
+                        except ValueError:
+                            idx_truth = None
+                        try:
+                            idx_cond = data_names.index('Condition')
+                        except ValueError:
+                            idx_cond = None
+                        idx_gen = data_names.index('Generated')
+
+                        # -- Truth --
+                        if idx_truth is not None:
+                            t_img = data_plot[idx_truth][i].squeeze()
+                            if transform_back_bf_plot:
+                                if var == 'temp':
+                                    t_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                                std=args.scale_std)(t_img)
+                                elif var == 'prcp':
+                                    t_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                                glob_mean_log=args.scale_mean,
+                                                                glob_std_log=args.scale_std,
+                                                                glob_min_log=args.scale_min_log,
+                                                                glob_max_log=args.scale_max_log,
+                                                                buffer_frac=args.buffer_frac)(t_img)
+                            t_img = t_img.numpy()
+                        
+                        # -- Condition --
+                        if idx_cond is not None:
+                            c_img = data_plot[idx_cond][i].squeeze()
+                            if transform_back_bf_plot:
+                                if var == 'temp':
+                                    c_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                                std=args.scale_std)(c_img)
+                                elif var == 'prcp':
+                                    c_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                                glob_mean_log=args.scale_mean,
+                                                                glob_std_log=args.scale_std,
+                                                                glob_min_log=args.scale_min_log,
+                                                                glob_max_log=args.scale_max_log,
+                                                                buffer_frac=args.buffer_frac)(c_img)
+                            c_img = c_img.numpy()
+                        
+                        # -- Generated --
+                        g_img = data_plot[idx_gen][i].squeeze()
+                        if transform_back_bf_plot:
+                            if var == 'temp':
+                                g_img = ZScoreBackTransform(mean=args.scale_mean,
+                                                            std=args.scale_std)(g_img)
+                            elif var == 'prcp':
+                                g_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                                                            glob_mean_log=args.scale_mean,
+                                                            glob_std_log=args.scale_std,
+                                                            glob_min_log=args.scale_min_log,
+                                                            glob_max_log=args.scale_max_log,
+                                                            buffer_frac=args.buffer_frac)(g_img)
+                        g_img = g_img.numpy()
+
+                        # If ocean hidden, mask out in images THEN compute vmin, vmax
+                        if (not args.show_ocean) and ('LSM' in data_names):
+                            idx_lsm = data_names.index('LSM')
+                            lsm_img_ = data_plot[idx_lsm][i].squeeze()
+                            lsm_img = lsm_img_.numpy() if torch.is_tensor(lsm_img_) else lsm_img_
+                            # Where lsm_img < 0.5, set to nan
+                            if t_img is not None:
+                                t_img = np.where(lsm_img < 0.5, np.nan, t_img)
+                            if c_img is not None:
+                                c_img = np.where(lsm_img < 0.5, np.nan, c_img)
+                            g_img = np.where(lsm_img < 0.5, np.nan, g_img)
+
+                        # 2) Determine local vmin, vmax across T, C, G for sample i
+                        tcg_list = []
+                        if t_img is not None:
+                            tcg_list.append(t_img)
+                        if c_img is not None:
+                            tcg_list.append(c_img)
+                        tcg_list.append(g_img)
+                        tcg_array = np.stack(tcg_list, axis=0)
+
+                        # Get non-nan min/max
+                        vmin_i = np.nanmin(tcg_array)
+                        vmax_i = np.nanmax(tcg_array)
+                        print(f'vmin: {vmin_i}, vmax: {vmax_i}')
+
+                        # 3) Plot row 0 (Generated)
+                        
+                        # Create Axes divider for the top row (to allow for boxplot)
+                        divider = make_axes_locatable(axs[0, i])
+                        bax = divider.append_axes('right', size='10%', pad=0.1)
+                        cax = divider.append_axes('right', size='5%', pad=0.1)
+
+                        # Use plot_settings for cmap and local scaling
+                        cmap_ = plot_settings['Generated']['cmap']
+                        vmin_ = vmin_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmin']
+                        vmax_ = vmax_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmax']
+
+                        im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
+                        axs[0, i].set_title('Generated')
                         axs[0, i].axis('off')
-                        axs[0, i].set_ylim([0, img.shape[0]])
-                        fig.colorbar(image, ax=axs[0, i], fraction=0.046, pad=0.04, orientation='vertical')
+                        axs[0, i].set_ylim([0, g_img.shape[0]])
+                        
+                        # Colorbar on cax
+                        fig.colorbar(im_g, cax=cax)#, fraction=0.046, pad=0.04, orientation='vertical')
+
+                        # Boxplot on bax (exclude NaNs if ocean is masked)
+                        g_data_bp = g_img[~np.isnan(g_img)].flatten()
+
+                        mean_props = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+                        median_props = dict(linestyle='-', linewidth=2, color='black')
+                        flier_props = dict(marker='o', markerfacecolor='none', markersize=2, markeredgecolor='darkgreen', alpha=0.4)
+                        
+                        bax.boxplot(g_data_bp,
+                                    vert=True,
+                                    widths=2,
+                                    showmeans=True,
+                                    meanprops=mean_props,
+                                    medianprops=median_props,
+                                    flierprops=flier_props,
+                                    )
+                        bax.set_xticks([])
+                        bax.set_yticks([])
+                        bax.set_frame_on(False)
+                        
 
 
-                    # Loop through the generated samples (and corresponding truth, condition, lsm and topo) and plot
-                    for i in range(n_gen_samples):
+                        # 4) Plot the rest of the data_plot in subsequent rows
                         for j in range(n_axs):
-                            img = data_plot[j][i].squeeze()
-                            if data_names[j] == 'Truth' or data_names[j] == 'Condition':
-                                cmap_name_use = cmap_name
+                            dname = data_names[j]
+                            img_j_ = data_plot[j][i].squeeze()
+                            arr_np = img_j_.numpy() if torch.is_tensor(img_j_) else img_j_
+
+                            # If T or C present, reuse backtransformed and masked data
+                            if dname == 'Truth' and t_img is not None:
+                                arr_np = t_img
+                            elif dname == 'Condition' and c_img is not None:
+                                arr_np = c_img
+                            
+                            divider = make_axes_locatable(axs[j+1, i])
+
+                            # If T, C or G, do boxplot + colorbar
+                            if dname in ['Truth', 'Condition', 'Generated']:
+                                bax = divider.append_axes('right', size='10%', pad=0.1)
+                                cax = divider.append_axes('right', size='5%', pad=0.1)
                             else:
-                                cmap_name_use = 'viridis'
-                            image = axs[j+1, i].imshow(img, cmap=cmap_name_use)
-                            axs[j+1, i].set_title(f'{data_names[j]}')
+                                # only colorbar
+                                bax = None
+                                cax = divider.append_axes('right', size='5%', pad=0.1)
+
+                            # Get settings from dictinory
+                            cmap_ = plot_settings[dname]['cmap']
+                            if plot_settings[dname]['use_local_scale']:
+                                vmin_ = vmin_i
+                                vmax_ = vmax_i
+                            else:
+                                vmin_ = plot_settings[dname]['vmin']
+                                vmax_ = plot_settings[dname]['vmax']
+
+
+                            im_ = axs[j+1, i].imshow(arr_np, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
+                            axs[j+1, i].set_title(dname)
                             axs[j+1, i].axis('off')
-                            axs[j+1, i].set_ylim([0, img.shape[0]])
-                            fig.colorbar(image, ax=axs[j+1, i], fraction=0.046, pad=0.04)
+                            axs[j+1, i].set_ylim([0, arr_np.shape[0]])
+                            fig.colorbar(im_, cax=cax)#, fraction=0.046, pad=0.04)
+
+                            if dname in ['Truth', 'Condition', 'Generated']:
+                                arr_bp = arr_np[~np.isnan(arr_np)].flatten()
+                                bax.boxplot(arr_bp,
+                                            vert=True,
+                                            widths=2,
+                                            showmeans=True,
+                                            meanprops=mean_props,
+                                            medianprops=median_props,
+                                            flierprops=flier_props
+                                            )
+                                bax.set_xticks([])
+                                bax.set_yticks([])
+                                bax.set_frame_on(False)
+
 
                     fig.tight_layout()
                     if args.show_figs:
@@ -561,32 +803,13 @@ def main_sbgm(args):
                     # Save figure
                     if args.save_figs:
                         if epoch == (epochs - 1):
-                            fig.savefig(PATH_FIGURES + NAME_FINAL_SAMPLES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+                            fig.savefig(PATH_FIGURES + NAME_FINAL_SAMPLES + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
                             print(f'Saving final generated sample in {PATH_SAMPLES} as {NAME_FINAL_SAMPLES}.png')
                         else:
-                            fig.savefig(PATH_FIGURES + NAME_SAMPLES + str(epoch+1) + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+                            fig.savefig(PATH_FIGURES + NAME_SAMPLES + str(epoch+1) + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
                             print(f'Saving generated samples in {PATH_FIGURES} as {NAME_SAMPLES}{epoch+1}.png')
                     
                     break
-
-                
-                fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-                ax.plot(train_losses, label='Train')
-                ax.plot(valid_losses, label='Validation')
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('Loss')
-                ax.set_title('Loss')
-                ax.legend(loc='upper right')
-                if args.show_figs:
-                    plt.show()
-                    
-                if args.save_figs:
-                    fig.savefig(PATH_FIGURES + NAME_LOSSES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
-
-                with open(PATH_LOSSES + '/' + NAME_LOSSES + '_train', 'wb') as fp:
-                    pickle.dump(train_losses, fp)
-                with open(PATH_LOSSES + '/' + NAME_LOSSES + '_valid', 'wb') as fp:
-                    pickle.dump(valid_losses, fp)
                 
                 # Set model back to train mode
                 pipeline.model.train()
