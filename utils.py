@@ -31,6 +31,9 @@ import json
 import netCDF4 as nc
 import torch.nn as nn
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
 
 
 def model_summary(model):
@@ -342,60 +345,133 @@ def convert_nc_to_zarr(nc_directory, zarr_file, VERBOSE=False):
                 # Save the data as a zarr array
                 zarr_group.array(nc_file.replace('.nc', '') + '/' + var, data, chunks=True, dtype=np.float32)
 
-
 def extract_samples(samples, device=None):
-    '''
-        Function to extract samples from dictionary.
-        Returns the samples as variables.
-        If not in dictionary, returns None.
-        Also sends the samples to the device and converts to float.
-    '''
-    images = None
-    seasons = None
-    cond_images = None
-    lsm = None
-    sdf = None
-    topo = None
-
+    """
+        Extract samples from the dictionary returned by the dataset class.
+        Expected keys:
+            - HR image: key ending with '_hr' (e.g. 'prcp_hr') [ignoring keys ending with '_original']
+            - Classifier: key 'classifier'
+            - LR conditions: key(s) ending with '_lr' (e.g. 'prcp_lr')
+            - HR mask: key 'lsm_hr'
+            - Land/sea mask: key 'lsm'
+            - SDF: key 'sdf'
+            - Topography: key 'topo'
+            - Points: keys 'hr_point' and 'lr_point'
+        If multiple LR condition keys are present, they are concatenated along the channel dimension
+    """
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # HR image (choose key ending with '_hr' not containing 'original')
+    hr_keys = [k for k in samples.keys() if k.endswith('_hr') and not k.endswith('_original')]
+    if len(hr_keys) == 0:
+        raise ValueError('No HR image found in samples dictionary.')
+    hr_img = samples[hr_keys[0]].to(device).float()
+    if len(hr_keys) > 1:
+        print(f'Warning: Multiple HR images found. Using the first one: {hr_keys[0]}')
+    
+    # Classifier (if available)
+    classifier = samples.get('classifier', None)
+    if classifier is not None:
+        classifier = classifier.to(device).float()
+
+    # LR conditions: if multiple, stack along channel dimensio
+    lr_keys = [k for k in samples.keys() if k.endswith('_lr') and not k.endswith('_original')]
+    if len(lr_keys) == 0:
+        lr_img = None
+    elif len(lr_keys) == 1:
+        lr_img = samples[lr_keys[0]].to(device).float()
+    else:
+        lr_list = [samples[k].to(device).float() for k in sorted(lr_keys)]
+        lr_img = torch.cat(lr_list, dim=0)
+
+    # HR mask (LSM)
+    lsm_hr = samples.get('lsm_hr', None)
+    if lsm_hr is not None:
+        lsm_hr = lsm_hr.to(device).float()
+    
+    # Land/sea mask (LSM)
+    lsm = samples.get('lsm', None)
+    if lsm is not None:
+        lsm = lsm.to(device).float()
+    
+    # SDF
+    sdf = samples.get('sdf', None)
+    if sdf is not None:
+        sdf = sdf.to(device).float()
+
+    # Topography
+    topo = samples.get('topo', None)
+    if topo is not None:
+        topo = topo.to(device).float()
+
+    # HR crop points (if available)
+    hr_points = samples.get('hr_point', None)
+    if hr_points is not None:
+        hr_points = hr_points.to(device).float()
+
+    # LR crop points (if available)
+    lr_points = samples.get('lr_point', None)
+    if lr_points is not None:
+        lr_points = lr_points.to(device).float()
+
+    # Return all extracted samples
+    return hr_img, classifier, lr_img, lsm_hr, lsm, sdf, topo, hr_points, lr_points
+
+
+# def extract_samples(samples, device=None):
+#     '''
+#         Function to extract samples from dictionary.
+#         Returns the samples as variables.
+#         If not in dictionary, returns None.
+#         Also sends the samples to the device and converts to float.
+#     '''
+#     images = None
+#     seasons = None
+#     cond_images = None
+#     lsm = None
+#     sdf = None
+#     topo = None
+
+#     if device is None:
+#         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
 
-    if 'img' in samples.keys() and samples['img'] is not None:
-        images = samples['img'].to(device)
-        images = samples['img'].to(torch.float)
-    else:
-        # Stop if no images (images are required)
-        raise ValueError('No images in samples dictionary.')
+#     if 'img' in samples.keys() and samples['img'] is not None:
+#         images = samples['img'].to(device)
+#         images = samples['img'].to(torch.float)
+#     else:
+#         # Stop if no images (images are required)
+#         raise ValueError('No images in samples dictionary.')
     
-    if 'classifier' in samples.keys() and samples['classifier'] is not None:
-        seasons = samples['classifier'].to(device)
+#     if 'classifier' in samples.keys() and samples['classifier'] is not None:
+#         seasons = samples['classifier'].to(device)
 
-    if 'img_cond' in samples.keys() and samples['img_cond'] is not None:
-        cond_images = samples['img_cond'].to(device)
-        cond_images = samples['img_cond'].to(torch.float)
+#     if 'img_cond' in samples.keys() and samples['img_cond'] is not None:
+#         cond_images = samples['img_cond'].to(device)
+#         cond_images = samples['img_cond'].to(torch.float)
 
-    if 'lsm' in samples.keys() and samples['lsm'] is not None:
-        lsm = samples['lsm'].to(device)
-        lsm = samples['lsm'].to(torch.float)
+#     if 'lsm' in samples.keys() and samples['lsm'] is not None:
+#         lsm = samples['lsm'].to(device)
+#         lsm = samples['lsm'].to(torch.float)
     
-    if 'sdf' in samples.keys() and samples['sdf'] is not None:
-        sdf = samples['sdf'].to(device)
-        sdf = samples['sdf'].to(torch.float)
+#     if 'sdf' in samples.keys() and samples['sdf'] is not None:
+#         sdf = samples['sdf'].to(device)
+#         sdf = samples['sdf'].to(torch.float)
     
-    if 'topo' in samples.keys() and samples['topo'] is not None:
-        topo = samples['topo'].to(device)
-        topo = samples['topo'].to(torch.float)
+#     if 'topo' in samples.keys() and samples['topo'] is not None:
+#         topo = samples['topo'].to(device)
+#         topo = samples['topo'].to(torch.float)
     
-    if 'point' in samples.keys() and samples['point'] is not None:
-        point = samples['point'].to(device)
-        point = samples['point'].to(torch.float)
-        # Print type of topo
-        #print(f'Topo is of type: {topo.dtype}')
-    else:
-        point = None
+#     if 'point' in samples.keys() and samples['point'] is not None:
+#         point = samples['point'].to(device)
+#         point = samples['point'].to(torch.float)
+#         # Print type of topo
+#         #print(f'Topo is of type: {topo.dtype}')
+#     else:
+#         point = None
 
-    return images, seasons, cond_images, lsm, sdf, topo, point
+#     return images, seasons, cond_images, lsm, sdf, topo, point
 
 
 
@@ -472,3 +548,325 @@ def str2dict(v):
         return ast.literal_eval(v)
     except (ValueError, SyntaxError):
         raise argparse.ArgumentTypeError("Invalid dictionary format.")
+    
+
+def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
+                show_ocean=False, force_matching_scale=False,
+                global_min=None, global_max=None, extra_keys=None,
+                hr_cmap='plasma', lr_cmap_dict=None, # e.g. {"prcp": "inferno", "temp": "plasma", ...}
+                default_lr_cmap='inferno', extra_cmap_dict=None, # e.g. {"topo": "terrain", "sdf": "coolwarm","lsm": "binary"}
+                figsize=(15, 4)):
+    """
+        Plot a single sample (dictionary from the dataset class) in a consistent layout
+        
+        Expected keys in sample:
+            - HR image: f"{var}_hr" (and optionally f"{var}_hr_original")
+            - LR condition(s): keys ending with "_lr" (and optionally "_lr_original")
+            - HR mask for ocean masking: "lsm_hr" (used only for HR images)
+            - Extra keys (e.g. geo variables) if provided via extra keys
+
+        Parameters:
+            - sample: Dictionary containing the sample
+            - hr_model: String label for the HR model (e.g. "DANRA")
+            - hr_units: Units for the HR image (e.g. "°C")
+            - lr_model: String label for the LR model (e.g. "ERA5")
+            - lr_units: A list of units for each LR condition (order must match the keys) e.g. ["°C", "mm/day"]
+            - var: HR variable name (e.g. "temp" or "prcp")
+            - show_ocean: Boolean to show ocean or not (i.e. masking HR images)
+            - force_matching_scale: If True, and global_min/max are provided, use to set the colorscale - only for matching variables
+            - global_min, global_max: Dictionaries mapping keys (e.g. "prcp_hr", "prcp_lr") to scalar min and max
+            - extra_keys: List of extra keys to plot (e.g. "topo", "sdf")
+            - hr_cmap: Colormap for HR images (default: 'plasma')
+            - lr_cmap_dict: Dictionary mapping LR variable base names to colormaps (e.g. {"prcp": "inferno", "temp": "plasma"})
+            - default_lr_cmap: Default colormap for LR images (if not specified in lr_cmap_dict)
+            - extra_cmap_dict: Dictionary mapping extra keys to colormaps (e.g. {"topo": "terrain", "sdf": "coolwarm","lsm": "binary"})
+            - figsize: Tuple for figure size
+
+        Returns:
+            - fig: The matplotlib Figure object
+    """
+
+    # Build list of keys for "variable" images:
+    hr_key = f"{var}_hr"
+    # Find LR keys from sample (assume keys ending with '_lr'): sort alphabetically for consistency
+    lr_keys = sorted([k for k in sample.keys() if k.endswith('_lr')])
+
+    # Scaled keys: HR and LR images
+    scaled_keys = [hr_key] + lr_keys
+    # Original keys: If available, ending with '_original'
+    original_keys = []
+    for key in scaled_keys:
+        orig_key = key + "_original"
+        if orig_key in sample:
+            original_keys.append(orig_key)
+    # Combing: extra keys (e.g. geo) will be appended later
+    plot_keys = scaled_keys + original_keys
+    if extra_keys is not None:
+        plot_keys += extra_keys
+
+    n_keys = len(plot_keys)
+
+    # Create subplots in one row (one column per key)
+    fig, axs = plt.subplots(1, n_keys, figsize=figsize)
+    # Ensure axs is iteravle (if only one subplot, wrap in list)
+    if n_keys == 1:
+        axs = [axs]
+
+    # Loop over each key and plot
+    for idx, key in enumerate(plot_keys):
+        ax = axs[idx]
+        if key not in sample or sample[key] is None:
+            ax.axis('off')
+            continue
+
+        # Get the image data; if a tensor, convert to np array
+        img_data = sample[key]
+        if torch.is_tensor(img_data):
+            img_data = img_data.squeeze().cpu().numpy()
+
+        # For HR images (keys ending with '_hr' or '_hr_original'), if show_ocean is False, apply masking using lsm_hr
+        if not show_ocean and (key.endswith("_hr") or key.endswith("_hr_original")):
+            if "lsm_hr" in sample and sample["lsm_hr"] is not None:
+                mask = sample["lsm_hr"].squeeze().cpu().numpy()
+                # ASsume mask values below 1 indicates ocean - set pixels to NaN
+                img_data = np.where(mask < 1, np.nan, img_data)
+
+        # Determine the colormap based on the key:
+        if key.endswith('_hr') or key.endswith('_hr_original'):
+            cmap = hr_cmap
+        elif key.endswith('_lr') or key.endswith('_lr_original'):
+            # Remove suffix to get the base condition name
+            if key.endswith('_lr'):
+                base = key[:-3]
+            elif key.endswith('_lr_original'):
+                base = key[:-12]
+            print(f"Base: {base}")
+            if lr_cmap_dict is not None and base in lr_cmap_dict:
+                cmap = lr_cmap_dict[base]
+            else:
+                cmap = default_lr_cmap
+        else:
+            # For extra keys, use the provided cmap_dict or default to 'viridis'
+            if extra_cmap_dict is not None and key in extra_cmap_dict:
+                cmap = extra_cmap_dict[key]
+            else:
+                cmap = 'viridis' # Default colormap for extra keys
+
+        # Determine vmin and vmax: if force_matching_scale is True and dicts are provided, use them, otherwise compute from data
+        if force_matching_scale and global_min is not None and global_max is not None:
+            vmin = global_min.get(key, np.nanmin(img_data)) # get min from dict or compute from data
+            vmax = global_max.get(key, np.nanmax(img_data)) # get max from dict or compute from data
+        else:
+            vmin = np.nanmin(img_data)
+            vmax = np.nanmax(img_data)
+
+        # Plot the image 
+        im = ax.imshow(img_data, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='nearest')
+        ax.invert_yaxis()  # Invert y-axis to match the original image orientation
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        # Create an axes divider to add a colorbar and (for variable images) a boxplot
+        divider = make_axes_locatable(ax)
+        if key.endswith('_hr') or key.endswith('_lr') or key.endswith('_hr_original') or key.endswith('_lr_original'):
+            bax = divider.append_axes("right", size="10%", pad=0.1)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+            # Boxplot settings
+            flierprops = dict(marker='o', markerfacecolor='none', markersize=2,
+                              linestyle='None', markeredgecolor='darkgreen', alpha=0.4)
+            medianprops = dict(linestyle='-', linewidth=2, color='black')
+            meanpointprops = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+            # Exclude Nans.
+            if torch.is_tensor(img_data):
+                mask = ~torch.isnan(img_data)
+                img_bp = img_data[mask].flatten().cpu().numpy()
+            else:
+                img_bp = img_data[~np.isnan(img_data)].flatten()
+                if len(img_bp) > 0:
+                    bax.boxplot(img_bp,
+                                vert=True,
+                                widths=2,
+                                showmeans=True,
+                                meanprops=meanpointprops,
+                                flierprops=flierprops,
+                                medianprops=medianprops,)
+                bax.set_xticks([])
+                bax.set_yticks([])
+                bax.set_frame_on(False)
+        else:
+            # For extra keys, just add a colorbar
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+            bax = None
+
+        fig.colorbar(im, cax=cax, orientation='vertical')
+        ax.set_title(f"{key} ({var})", fontsize=10)
+
+    fig.tight_layout()
+
+    return fig
+
+def plot_samples(sample_list, hr_model, hr_units, lr_model, lr_units, var,
+                         show_ocean=False, force_matching_scale=True, 
+                         global_min=None, global_max=None, extra_keys=None, 
+                         hr_cmap='plasma', 
+                         lr_cmap_dict=None,  # e.g., {"prcp": "inferno", "temp": "plasma"}
+                         default_lr_cmap='viridis',
+                         extra_cmap_dict=None,  # e.g., {"topo": "terrain", "lsm": "binary", "sdf": "coolwarm"}
+                         n_samples_threshold=3,
+                         figsize=(15, 8)):
+    """
+    Plot a batch of samples (provided as a list of sample dictionaries) in a grid where each row is a sample and
+    each column corresponds to a particular key (e.g., HR, LR, originals, geo).
+    
+    If the number of samples exceeds n_samples_threshold, only the first n_samples_threshold will be plotted.
+    
+    Parameters:
+      - sample_list: List of sample dictionaries.
+      - hr_model: String (e.g., "DANRA") for HR model name (used in titles).
+      - hr_units: Units for HR image (e.g., "mm" or "°C").
+      - lr_model: String (e.g., "ERA5") for LR model name.
+      - lr_units: List of units for LR conditions (order corresponding to sorted LR keys).
+      - var: HR variable name (e.g., "prcp" or "temp").
+      - show_ocean: If False, HR images are masked using the HR mask ("lsm_hr").
+      - force_matching_scale: If True and if global_min/global_max dictionaries are provided, those values are used.
+      - global_min, global_max: Dictionaries mapping keys (e.g., "prcp_hr", "prcp_lr") to scalar min and max values.
+      - extra_keys: List of extra keys to plot (e.g., ["topo", "sdf"]).
+      - hr_cmap: Colormap for HR images.
+      - lr_cmap_dict: Dictionary mapping LR condition base names to colormaps.
+      - default_lr_cmap: Default colormap for LR conditions if not found in lr_cmap_dict.
+      - extra_cmap_dict: Dictionary mapping extra key names to colormaps.
+      - n_samples_threshold: Maximum number of samples (rows) to plot.
+      - figsize: Overall figure size.
+      
+    Returns:
+      - fig: The matplotlib Figure object.
+    """
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    # Limit the number of samples to plot if necessary.
+    if len(sample_list) > n_samples_threshold:
+        print(f"Plotting first {n_samples_threshold} samples out of {len(sample_list)} provided.")
+        sample_list = sample_list[:n_samples_threshold]
+    
+    # Construct the keys:
+    # HR key is "var_hr" (e.g., "prcp_hr")
+    hr_key = f"{var}_hr"
+    # Assume LR keys end with '_lr'
+    lr_keys = sorted([key for key in sample_list[0].keys() if key.endswith('_lr')])
+    scaled_keys = [hr_key] + lr_keys
+
+    # Determine original keys if available.
+    original_keys = []
+    for key in scaled_keys:
+        orig_key = key + "_original"
+        if orig_key in sample_list[0]:
+            original_keys.append(orig_key)
+    
+    # Build final list of keys. Append extra keys if provided.
+    plot_keys = scaled_keys + original_keys
+    if extra_keys is not None:
+        plot_keys += extra_keys
+
+    num_samples = len(sample_list)
+    num_keys = len(plot_keys)
+
+    # Create a grid with rows = number of samples and columns = number of keys
+    fig, axs = plt.subplots(num_samples, num_keys, figsize=figsize)
+    # Set figure title 
+    fig.suptitle(f"Sample images for {var} (HR: {hr_model} and LR: {lr_model})", fontsize=16)
+    if num_samples == 1:
+        axs = np.expand_dims(axs, axis=0)
+    if num_keys == 1:
+        axs = np.expand_dims(axs, axis=1)
+
+    for row, sample in enumerate(sample_list):
+        for col, key in enumerate(plot_keys):
+            ax = axs[row, col]
+            if key not in sample or sample[key] is None:
+                ax.axis('off')
+                continue
+            # Retrieve image data
+            img_data = sample[key]
+            if torch.is_tensor(img_data):
+                img_data = img_data.squeeze().cpu().numpy()
+            # For HR images mask out ocean using lsm_hr if needed.
+            if not show_ocean and (key.endswith('_hr') or key.endswith('_hr_original')):
+                if "lsm_hr" in sample and sample["lsm_hr"] is not None:
+                    mask = sample["lsm_hr"].squeeze().cpu().numpy()
+                    img_data = np.where(mask < 1, np.nan, img_data)
+            # Determine color limits.
+            if force_matching_scale and global_min is not None and global_max is not None:
+                vmin = global_min.get(key, np.nanmin(img_data))
+                vmax = global_max.get(key, np.nanmax(img_data))
+            else:
+                vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
+            # Choose colormap:
+            if key.endswith('_hr') or key.endswith('_hr_original'):
+                cmap = hr_cmap
+            elif key.endswith('_lr') or key.endswith('_lr_original'):
+                if key.endswith('_lr'):
+                    base = key[:-3]
+                else:
+                    base = key[:-12]
+                if lr_cmap_dict is not None and base in lr_cmap_dict:
+                    cmap = lr_cmap_dict[base]
+                else:
+                    cmap = default_lr_cmap
+            else:
+                if extra_cmap_dict is not None and key in extra_cmap_dict:
+                    cmap = extra_cmap_dict[key]
+                else:
+                    cmap = 'viridis'
+            im = ax.imshow(img_data, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='nearest')
+            ax.invert_yaxis()
+            ax.set_xticks([])
+            ax.set_yticks([])
+            divider = make_axes_locatable(ax)
+            # For keys that correspond to variable fields, add a boxplot next to the colorbar.
+            if key.endswith('_hr') or key.endswith('_lr') or key.endswith('_hr_original') or key.endswith('_lr_original'):
+                bax = divider.append_axes("right", size="10%", pad=0.1)
+                cax = divider.append_axes("right", size="5%", pad=0.1)
+                flierprops = dict(marker='o', markerfacecolor='none', markersize=2,
+                                  linestyle='none', markeredgecolor='darkgreen', alpha=0.4)
+                medianprops = dict(linestyle='-', linewidth=2, color='black')
+                meanpointprops = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+                img_flat = img_data[~np.isnan(img_data)].flatten()
+                if len(img_flat) > 0:
+                    bax.boxplot(img_flat,
+                                vert=True,
+                                widths=2,
+                                patch_artist=True,
+                                showmeans=True,
+                                meanprops=meanpointprops,
+                                medianprops=medianprops,
+                                flierprops=flierprops)
+                bax.set_xticks([])
+                bax.set_yticks([])
+                bax.set_frame_on(False)
+            else:
+                cax = divider.append_axes("right", size="5%", pad=0.1)
+            fig.colorbar(im, cax=cax)
+            # Set column title (only for top row)
+            if row == 0:
+                if key.endswith('_hr'):
+                    title = f"HR {hr_model} ({var})\nscaled"
+                elif key.endswith('_hr_original'):
+                    title = f"HR {hr_model} ({var})\noriginal [{hr_units}]"
+                elif key.endswith('_lr'):
+                    title = f"LR {lr_model} ({base})\nscaled"
+                elif key.endswith('_lr_original'):
+                    title = f"LR {lr_model} ({base})\noriginal [{lr_units[lr_keys.index(base)]}]"
+                elif key in extra_keys:
+                    if key == "topo":
+                        title = f"Topography"
+                    elif key == "sdf":
+                        title = f"SDF"
+                    elif key == "lsm":
+                        title = f"Land/Sea Mask"
+                    else:
+                        title = f"{key}"
+                else:
+                    title = f"{key}"
+                ax.set_title(title, fontsize=10)
+    fig.tight_layout()
+    return fig

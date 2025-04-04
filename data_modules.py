@@ -748,6 +748,10 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 lr_scaling_methods:list = ['zscore'], # Scaling methods for low resolution conditions
                 lr_scaling_params:list = [{'glob_mean':8.69251, 'glob_std':6.192434}], # Scaling parameters for low resolution conditions
                 lr_cond_dirs_zarr:dict = None,           # Path to directories containing conditional data (in format dict({'condition1':dir1, 'condition2':dir2}))
+                # NEW: LR conditioning area size (if cropping is desired)
+                lr_data_size: tuple = None,         # Size of low resolution data (2D image, tuple), e.g. (589,789) for full LR domain
+                # Optionally a separate cutout domain for LR conditions
+                lr_cutout_domains: list = None,    # Domains to use for cutouts for LR conditions
                 # Geo variables (stationary) and their full domain arrays
                 geo_variables:list = ['lsm', 'topo'], # Geo variables to load
                 lsm_full_domain = None,             # Land-sea mask of full domain
@@ -763,11 +767,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 scale:bool = True,                  # Whether to scale data to new interval
                 save_original:bool = False,         # Whether to save original data
                 conditional_seasons:bool = False,   # Whether to use seasonal conditional sampling
-                n_classes:int = None,               # Number of classes for conditional sampling
-                # NEW: LR conditioning area size (if cropping is desired)
-                lr_data_size: tuple = None,         # Size of low resolution data (2D image, tuple), e.g. (589,789) for full LR domain
-                # Optionally a separate cutout domain for LR conditions
-                lr_cutout_domains: list = None    # Domains to use for cutouts for LR conditions
+                n_classes:int = None               # Number of classes for conditional sampling
                 ):                       
         '''
         Initializes the dataset.
