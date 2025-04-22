@@ -1,0 +1,45 @@
+# config.yaml
+device: "none"
+
+# Path to data
+full_domain_size: [589, 789]
+path_data: "/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/"
+path_lsm_full_domain: "data_lsm/truth_fullDomain/lsm_full.npz"
+path_topo_full_domain: "data_topo/truth_fullDomain/topo_full.npz"
+
+# HR data specifications
+hr_var: "prcp"
+hr_model: "DANRA"
+hr_data_size: [128, 128]
+hr_scaling_method: "log_minus1_1"
+hr_scaling_params: 
+  glob_min: 0
+  glob_max: 160
+  glob_min_log: -20
+  glob_max_log: 10
+  glob_mean_log: -25.0
+  glob_std_log: 10.0
+  buffer_frac: 0.5
+
+# LR data specifications
+lr_conditions:
+  - "prcp"
+  - "temp"
+lr_model: "ERA5"
+lr_data_size: [128, 128]
+lr_scaling_methods: 
+  - "log_minus1_1"
+  - "zscore"
+lr_scaling_params:
+  - glob_min: 0
+    glob_max: 70
+    glob_min_log: -10
+    glob_max_log: 5
+    glob_mean_log: -25.0
+    glob_std_log: 10.0
+    buffer_frac: 0.5
+  - glob_mean: 8.69251
+    glob_std: 6.192434
+
+# Dataset and sampling options
+n_samples: 4

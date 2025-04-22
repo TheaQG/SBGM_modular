@@ -79,7 +79,7 @@ def launch_test_dataset_from_args():
     parser = argparse.ArgumentParser(description='Test the dataset')
     parser.add_argument('--hr_model', type=str, default='DANRA', help='The HR model to use')
     parser.add_argument('--hr_var', type=str, default='prcp', help='The HR variable to use')
-    parser.add_argument('--hr_dim', type=int, default=128, help='The image dimension')
+    parser.add_argument('--hr_data_size', type=str2list, default=[128, 128], help='The HR image dimension as list, e.g. [128, 128]')
     parser.add_argument('--hr_scaling_method', type=str, default='log_minus1_1', help='The scaling method for the HR variable')
     # Scaling params are provided as JSON-like strings
     parser.add_argument('--hr_scaling_params', type=str, default='{"glob_min": 0, "glob_max": 160, "glob_min_log": -20, "glob_max_log": 10, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}', #'{"glob_mean": 8.69251, "glob_std": 6.192434}', 
@@ -110,6 +110,7 @@ def launch_test_dataset_from_args():
     parser.add_argument('--sample_w_sdf', type=str2bool, default=True, help='Whether to sample with sdf')
     parser.add_argument('--scaling', type=str2bool, default=True, help='Whether to scale the data')
     parser.add_argument('--path_data', type=str, default='/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/', help='The path to the data')
+    parser.add_argument('--full_domain_dims', type=str2list, default=[589, 789], help='The full domain dimensions for the data')
     parser.add_argument('--save_figs', type=str2bool, default=False, help='Whether to save the figures')
     parser.add_argument('--specific_fig_name', type=str, default=None, help='If not None, saves figure with this name')
     parser.add_argument('--show_figs', type=str2bool, default=True, help='Whether to show the figures')
@@ -174,8 +175,7 @@ def test_dataset(args):
             lr_units.append('Unknown')
 
     # Set image dimensions (HR)
-    n_img_size = args.hr_dim
-    image_size = (n_img_size, n_img_size)
+    hr_data_size = tuple(args.hr_data_size) if args.hr_data_size is not None else None
 
     # Convert LR data size and LR cutout domains to tuples (if provided)
     lr_data_size = tuple(args.lr_data_size) if args.lr_data_size is not None else None
@@ -190,11 +190,12 @@ def test_dataset(args):
     hr_model = args.hr_model
     lr_model = args.lr_model
 
-    hr_zarr_dir = args.path_data + f'data_{hr_model}/size_589x789/{hr_var}_589x789/zarr_files/test.zarr'
+
+    hr_zarr_dir = args.path_data + f'data_{hr_model}/size_{args.full_domain_dims[0]}x{args.full_domain_dims[1]}/{hr_var}_{args.full_domain_dims[0]}x{args.full_domain_dims[1]}/zarr_files/test.zarr'
     lr_conditions = args.lr_conditions
     lr_cond_dirs_zarr = {}
     for cond in lr_conditions:
-        lr_path = args.path_data + f'data_{lr_model}/size_589x789/{cond}_589x789/zarr_files/test.zarr'
+        lr_path = args.path_data + f'data_{lr_model}/size_{args.full_domain_dims[0]}x{args.full_domain_dims[1]}/{cond}_{args.full_domain_dims[0]}x{args.full_domain_dims[1]}/zarr_files/test.zarr'
         print(f'Adding LR condition {cond} with path:\n\t{lr_path}')
         lr_cond_dirs_zarr[cond] = lr_path
 
@@ -259,7 +260,7 @@ def test_dataset(args):
     # Initialize the new dataset class
     dataset = DANRA_Dataset_cutouts_ERA5_Zarr_test(
         hr_variable_dir_zarr=hr_zarr_dir,
-        data_size=image_size,
+        hr_data_size=hr_data_size,
         n_samples=n_samples,
         cache_size=cache_size,
         hr_variable=hr_var,
@@ -497,7 +498,7 @@ def test_dataset(args):
 
 #     # Initialize dataset with all options
 #     dataset = DANRA_Dataset_cutouts_ERA5_Zarr_test(hr_variable_dir_zarr = hr_zarr_dir,
-#                                                 data_size = image_size,
+#                                                 hr_data_size = image_size,
 #                                                 n_samples=n_samples,
 #                                                 cache_size=cache_size,
 #                                                 hr_variable=hr_var,

@@ -738,7 +738,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
     def __init__(self, 
                 # Must-have parameters
                 hr_variable_dir_zarr:str,           # Path to high resolution data
-                data_size:tuple,                    # Size of data (2D image, tuple)
+                hr_data_size:tuple,                    # Size of data (2D image, tuple)
                 # HR target variable and its scaling parameters
                 hr_variable:str = 'temp',           # Variable to load (temp or prcp)
                 hr_scaling_method:str = 'zscore',   # Scaling method for high resolution data
@@ -776,7 +776,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         # Basic dataset parameters
         self.hr_variable_dir_zarr = hr_variable_dir_zarr
         self.n_samples = n_samples
-        self.data_size = data_size
+        self.hr_data_size = hr_data_size
         self.cache_size = cache_size
 
         # LR conditions and scaling parameters
@@ -802,16 +802,16 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         # Save new LR parameters
         self.lr_data_size = lr_data_size
         self.lr_cutout_domains = lr_cutout_domains
-        print(self.lr_cutout_domains)
+        
         # Check whether lr_cutout_domains are parsed as a list or tuple - even if 'None' - and set correctly to None if not
         if isinstance(self.lr_cutout_domains, list) or isinstance(self.lr_cutout_domains, tuple):
             if len(self.lr_cutout_domains) == 0 or (len(self.lr_cutout_domains) == 1 and str(self.lr_cutout_domains[0]).lower() == 'none'):
                 self.lr_cutout_domains = None
             else:
                 self.lr_cutout_domains = self.lr_cutout_domains
-        print(self.lr_cutout_domains)
+        
         # Specify target LR size (if different from HR size)
-        self.target_lr_size = self.lr_data_size if self.lr_data_size is not None else self.data_size
+        self.target_lr_size = self.lr_data_size if self.lr_data_size is not None else self.hr_data_size
 
 
         # Save LR condition directories
@@ -930,7 +930,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         if self.scale:
             hr_transform_list = [
                 transforms.ToTensor(),
-                transforms.Resize(self.data_size, antialias=True)
+                transforms.Resize(self.hr_data_size, antialias=True)
             ]
             hr_buff = self.hr_scaling_params.get('buffer_frac', 0.5)
             if self.hr_scaling_method == 'zscore':
@@ -949,7 +949,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         else:
             self.hr_transform = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(self.data_size, antialias=True)
+                transforms.Resize(self.hr_data_size, antialias=True)
             ])
 
         # Build a transform for the geo variables, with possible scaling  to [0,1]
@@ -1072,10 +1072,9 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         # Determine crop region, if cutouts are used
         if self.cutouts:
             # hr_point is computed using HR cutout domain and HR data size
-            hr_point = find_rand_points(self.cutout_domains, self.data_size)
+            hr_point = find_rand_points(self.cutout_domains, self.hr_data_size)
             if self.lr_data_size is not None:
                 # If a separate LR cutout domain is provided, use it
-                print(self.lr_cutout_domains)
                 if self.lr_cutout_domains is not None:
                     lr_point = find_rand_points(self.lr_cutout_domains, self.target_lr_size)
                 else:
@@ -1184,7 +1183,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             # Separate geo transform, with resize to HR size
             geo_transform_lsm_hr = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(self.data_size, antialias=True)
+                transforms.Resize(self.hr_data_size, antialias=True)
             ])
             lsm_hr = geo_transform_lsm_hr(lsm_hr)
             sample_dict['lsm_hr'] = lsm_hr

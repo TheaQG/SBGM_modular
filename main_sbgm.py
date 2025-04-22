@@ -1,6 +1,9 @@
-import os, torch
+import os
+import torch
 import pickle
 import zarr
+import yaml
+import sys
 
 import numpy as np
 
@@ -18,6 +21,43 @@ from training import *
 from utils import *
 
 
+'''
+    .args to be passed to the main function:
+    - hr_var
+    - lr_conditions
+    - hr_data_size
+    - lr_data_size
+    - cutout_domains
+    - scaling
+    - show_both_orig_scaled
+    - force_matching_scale
+    - transform_back_bf_plot
+    - path_data
+    - hr_model
+    - lr_model
+    - full_domain_dims
+
+
+
+'''
+
+import os
+
+def build_data_path(base_path, model, var, full_domain_dims, split):
+    """
+    Construct a path for high-resolution data.
+    Example: base_path + 'data_DANRA/size_589x789/temp_589x789/zarr_files/train.zarr'
+    """
+    return os.path.join(base_path, f"data_{model}", f"size_{full_domain_dims[0]}x{full_domain_dims[1]}", f"{var}_{full_domain_dims[0]}x{full_domain_dims[1]}", "zarr_files", f"{split}.zarr")
+
+def load_config(yaml_file):
+    """
+    Loads a YAML configuration file and returns dictionary
+    """
+    with open(yaml_file, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
+
 def main_sbgm_new(args):
     ##########################################################
     #                                                        #
@@ -26,135 +66,147 @@ def main_sbgm_new(args):
     #                                                        #
     #                                                        #
     ##########################################################
-    # Startwith changing parsed input arguments ot captivate new dataset class.
+    # Start with changing parsed input arguments to captivate new dataset class.
     # Make an overview of what is going on in this function and what needs to be changed.
 
-
-    
     print('\n\n')
     print('#'*50)
     print('Running ddpm')
     print('#'*50)
     print('\n\n')
 
-    # Define different samplings
-    sample_w_lsm_topo = args.sample_w_lsm_topo
-    sample_w_cutouts = args.sample_w_cutouts
-    sample_w_cond_img = args.sample_w_cond_img
-    sample_w_cond_season = args.sample_w_cond_season
-    sample_w_sdf = args.sample_w_sdf
+    # Set HR and LR variables for use
+    hr_var = args.hr_var
+    lr_vars = args.lr_conditions
+   
 
-    # General settings for use
+    
+    # Define default LR colormaps and extra colormaps for geo variables
+    cmap_prcp = 'inferno'
+    cmap_temp = 'plasma'
+    lr_cmap_dict = {"prcp": cmap_prcp, "temp": cmap_temp}
+    extra_cmap_dict = {"topo": "terrain", "lsm": "binary", "sdf": "coolwarm"}
 
-    # Define DANRA data information 
-    # Set variable for use
-    var = args.HR_VAR 
-    lr_vars = args.LR_VARS
+    if hr_var == 'temp':
+        cmap_name = 'plasma'
+        hr_units = r'$^\circ$C'
+    elif hr_var == 'prcp':
+        cmap_name = 'inferno'
+        hr_units = 'mm'
+    else:
+        hr_units = 'Unknown'
+    
+    # Set units for LR conditions
+    prcp_units = 'mm'
+    temp_units = r'$^\circ$C'
+    lr_units = []
+    for cond in lr_vars:
+        if cond == 'prcp':
+            lr_units.append(prcp_units)
+        elif cond == 'temp':
+            lr_units.append(temp_units)
+        else:
+            lr_units.append('Unknown')
 
-    # If the length of lr_vars is 1, and var is not the same as lr_vars[0], raise warning and set lr_vars[0] as var
-    if len(lr_vars) == 1 and var != lr_vars[0]:
-        print(f'Warning: HR_VAR: {var} is not the same as LR_VARS[0]: {lr_vars[0]}. Setting LR_VARS[0] to HR_VAR')
-        lr_vars[0] = var
+    # Set image dimensions (if None, use default 128x128)
+    hr_data_size = tuple(args.hr_data_size) if args.hr_data_size is not None else None
+    if hr_data_size is None:
+        hr_data_size = (128, 128)
+    lr_data_size = tuple(args.lr_data_size) if args.lr_data_size is not None else None
+    if lr_data_size is None:
+        lr_data_size = (128, 128)
+    
+    # Set full domain size
+    full_domain_dims = tuple(args.full_domain_dims) if args.full_domain_dims is not None else None
 
-    # Set scaling to true or false
+    # Use helper function to create the path for the zarr files
+    print(f'\nUsing HR data type: {args.hr_model} {hr_var} [{hr_units}]')
+    hr_data_dir_train = build_data_path(args.path_data, args.hr_model, hr_var, full_domain_dims, 'train')
+    hr_data_dir_valid = build_data_path(args.path_data, args.hr_model, hr_var, full_domain_dims, 'valid')
+    hr_data_dir_test = build_data_path(args.path_data, args.hr_model, hr_var, full_domain_dims, 'test')
+
+    print(hr_data_dir_train)
+    # Loop over lr_vars and create the path for the zarr files
+    lr_cond_dirs_train = {}
+    lr_cond_dirs_valid = {}
+    lr_cond_dirs_test = {}
+    for i, cond in enumerate(lr_vars):
+        print(f'Using LR data type: {args.lr_model} {cond} [{lr_units[lr_vars.index(cond)]}]')
+        # Check if cond is in extra_cmap_dict
+        lr_cond_dirs_train[cond] = build_data_path(args.path_data, args.lr_model, cond, full_domain_dims, 'train')
+        lr_cond_dirs_valid[cond] = build_data_path(args.path_data, args.lr_model, cond, full_domain_dims, 'valid')
+        lr_cond_dirs_test[cond] = build_data_path(args.path_data, args.lr_model, cond, full_domain_dims, 'test')
+
+    # Set scaling and matching options
     scaling = args.scaling
-    noise_variance = args.noise_variance
-
-    # Define wether to transform data back from normalization/log-space before plotting
+    show_both_orig_scaled = args.show_both_orig_scaled
+    force_matching_scale = args.force_matching_scale
     transform_back_bf_plot = args.transform_back_bf_plot
 
-    # Set some color map settings
-    if var == 'temp':
-        cmap_name = 'plasma'
-        cmap_label = 'Temperature [°C]'
-    elif var == 'prcp':
-        cmap_name = 'inferno'
-        cmap_label = 'Precipitation [mm]'
-    
-    
-    # Print what LR and HR variables are used
-    print(f'High resolution variable: {var}')
-    print(f'Low resolution variables: {lr_vars}')
+    # Set up scaling methods
+    hr_scaling_method = args.hr_scaling_method
+    hr_scaling_params = ast.literal_eval(args.hr_scaling_params)
+    lr_scaling_methods = args.lr_scaling_methods
+    lr_scaling_params = [ast.literal_eval(param) for param in args.lr_scaling_params]
 
-    # Set DANRA size string for use in path
-    danra_size_str = '589x789'
-
-    PATH_SAVE = args.path_save
-    
-    # Path: .../Data_DiffMod
-    # To HR data: Path + '/data_DANRA/size_589x789/' + var + '_' + danra_size_str +  '/zarr_files/train.zarr'
-    PATH_HR = args.path_data + 'data_DANRA/size_' + danra_size_str + '/' + var + '_' + danra_size_str +  '/zarr_files/'
-    # Path to DANRA data (zarr files), full danra, to enable cutouts
-    data_dir_danra_train_w_cutouts_zarr = PATH_HR + 'train.zarr'
-    data_dir_danra_valid_w_cutouts_zarr = PATH_HR + 'valid.zarr'
-    data_dir_danra_test_w_cutouts_zarr = PATH_HR + 'test.zarr'
-
-    # To LR data: Path + '/data_ERA5/size_589x789/' + var + '_' + danra_size_str +  '/'
-    # Path to ERA5 data, 589x789 (same size as DANRA)
-    if args.LR_VARS is not None:
-        if len(lr_vars) == 1:
-            lr_var = lr_vars[0]
-            PATH_LR = args.path_data + 'data_ERA5/size_' + danra_size_str + '/' + lr_var + '_' + danra_size_str +  '/zarr_files/'
-            data_dir_era5_train_zarr = PATH_LR + 'train.zarr'
-            data_dir_era5_valid_zarr = PATH_LR + 'valid.zarr'
-            data_dir_era5_test_zarr = PATH_LR + 'test.zarr'
-        if len(lr_vars) > 1:
-            # NEED TO IMPLEMENT CONCATENATION OF MULTIPLE VARIABLES (before training, and save to zarr file)
-            KeyError('Multiple variables not yet implemented')
-            # Check if .zarr files in 'concat_' str_lr_vars + '_' + danra_size_str + '/zarr_files/' exists
-            str_lr_vars = '_'.join(lr_vars)
-            PATH_LR = args.path_data + 'data_ERA5/size_' + danra_size_str + '/' + 'concat_' + str_lr_vars + '_' + danra_size_str + '/zarr_files/' 
-            data_dir_era5_train_zarr = PATH_LR + 'train.zarr'
-            # Check if .zarr file exists and otherwise raise error
-            if not os.path.exists(data_dir_era5_train_zarr):
-                raise FileNotFoundError(f'File not found: {data_dir_era5_train_zarr}. If multiple variables are used, the zarr file should be concatenated and saved in the directory: {PATH_LR}')
-            
-            data_dir_era5_valid_zarr = PATH_LR + 'valid.zarr'
-            data_dir_era5_test_zarr = PATH_LR + 'test.zarr'
+    # Setup geo variables
+    sample_w_sdf = args.sample_w_sdf
+    if sample_w_sdf:
+        print('\nSDF weighted loss enabled. Setting lsm and topo to True.\n')
+        sample_w_geo = True
     else:
-        data_dir_era5_train_zarr = None
-        data_dir_era5_valid_zarr = None
-        data_dir_era5_test_zarr = None
-        
+        sample_w_geo = args.sample_w_geo
+
+    if sample_w_geo:
+        geo_variables = ['lsm', 'topo']
+        data_dir_lsm = args.path_data + 'data_lsm/truth_fullDomain/lsm_full.npz'
+        data_dir_topo = args.path_data + 'data_topo/truth_fullDomain/topo_full.npz'
+        data_lsm = np.flipud(np.load(data_dir_lsm)['data'])
+        data_topo = np.flipud(np.load(data_dir_topo)['data'])
+        if scaling:
+            if args.topo_min is None or args.topo_max is None:
+                topo_min, topo_max = np.min(data_topo), np.max(data_topo)
+            else:
+                topo_min, topo_max = args.topo_min, args.topo_max
+            if args.norm_min is None or args.norm_max is None:
+                norm_min, norm_max = np.min(data_lsm), np.max(data_lsm)
+            else:
+                norm_min, norm_max = args.norm_min, args.norm_max
+            OldRange = (topo_max - topo_min)
+            NewRange = (norm_max - norm_min)
+            data_topo = ((data_topo - topo_min) * NewRange / OldRange) + norm_min
+    else:
+        geo_variables = None
+        data_lsm = None
+        data_topo = None
+
+
+
+    # Setup cutouts
+    sample_w_cutouts = args.sample_w_cutouts
+    # Set cutout domains, if None, use default (170, 350, 340, 520) (DK area with room for shuffle) 
+    cutout_domains = tuple(args.cutout_domains) if args.cutout_domains is not None else None
+    if cutout_domains is None:
+        cutout_domains = (170, 350, 340, 520)
+    lr_cutout_domains = tuple(args.lr_cutout_domains) if args.lr_cutout_domains is not None else None
+    if lr_cutout_domains is None:
+        lr_cutout_domains = (170, 350, 340, 520)
+    # Setup conditional seasons (classification)
+    sample_w_cond_season = args.sample_w_cond_season
+    if sample_w_cond_season:
+        n_seasons = args.n_seasons
+    else:
+        n_seasons = None
+
     # Make zarr groups
-    data_danra_train_zarr = zarr.open_group(data_dir_danra_train_w_cutouts_zarr, mode='r')
-    data_danra_valid_zarr = zarr.open_group(data_dir_danra_valid_w_cutouts_zarr, mode='r')
-    data_danra_test_zarr = zarr.open_group(data_dir_danra_test_w_cutouts_zarr, mode='r')
+    data_danra_train_zarr = zarr.open_group(hr_data_dir_train, mode='r')
+    data_danra_valid_zarr = zarr.open_group(hr_data_dir_valid, mode='r')
+    data_danra_test_zarr = zarr.open_group(hr_data_dir_test, mode='r')
 
     # /scratch/project_465000956/quistgaa/Data/Data_DiffMod/
     n_files_train = len(list(data_danra_train_zarr.keys()))
     n_files_valid = len(list(data_danra_valid_zarr.keys()))
     n_files_test = len(list(data_danra_test_zarr.keys()))
-
-    CUTOUTS = sample_w_cutouts
-    if CUTOUTS:
-        CUTOUT_DOMAINS = args.CUTOUT_DOMAINS
-
-    if sample_w_lsm_topo:
-        data_dir_lsm = args.path_data + 'data_lsm/truth_fullDomain/lsm_full.npz'
-        data_dir_topo = args.path_data + 'data_topo/truth_fullDomain/topo_full.npz'
-
-        data_lsm = np.flipud(np.load(data_dir_lsm)['data'])
-        data_topo = np.flipud(np.load(data_dir_topo)['data'])
-
-        if scaling:
-            topo_min, topo_max = args.topo_min, args.topo_max
-            norm_min, norm_max = args.norm_min, args.norm_max
-            
-            OldRange = (topo_max - topo_min)
-            NewRange = (norm_max - norm_min)
-
-            # Generating the new data based on the given intervals
-            data_topo = (((data_topo - topo_min) * NewRange) / OldRange) + norm_min
-    else:
-        data_lsm = None
-        data_topo = None
-
-
-    # Define data hyperparameters
-    input_channels = args.in_channels
-    output_channels = args.out_channels
-
 
 
     n_samples_train = n_files_train
@@ -180,189 +232,102 @@ def main_sbgm_new(args):
     print(f'Cache size for test: {cache_size_test}\n')
     print(f'Total cache size: {cache_size_train + cache_size_valid + cache_size_test}\n\n\n')
 
-
-    image_size = args.HR_SIZE
-    image_dim = (image_size, image_size)
     
-    n_seasons = args.season_shape[0]
-    if n_seasons != 0:
-        condition_on_seasons = True
-    else:
-        condition_on_seasons = False
 
-    loss_type = args.loss_type
-    if loss_type == 'sdfweighted':
-        sdf_weighted_loss = True
-    else:
-        sdf_weighted_loss = False
 
-    config_name = args.config_name
-    save_str = config_name + '__' + var + '__' + str(image_size) + 'x' + str(image_size) + '__' + loss_type + '__' + str(n_seasons) + '_seasons' + '__' + str(noise_variance) + '_noise' + '__' + str(args.num_heads) + '_heads' + '__' + str(args.n_timesteps) + '_timesteps'
+    train_dataset = DANRA_Dataset_cutouts_ERA5_Zarr_test(
+                                hr_variable_dir_zarr=hr_data_dir_train,
+                                hr_data_size=hr_data_size,
+                                n_samples=n_samples_train,
+                                cache_size=cache_size_train,
+                                hr_variable=hr_var,
+                                hr_scaling_method=hr_scaling_method,
+                                hr_scaling_params=hr_scaling_params,
+                                lr_conditions=lr_vars,
+                                lr_scaling_methods=lr_scaling_methods,
+                                lr_scaling_params=lr_scaling_params,
+                                lr_cond_dirs_zarr=lr_cond_dirs_train,
+                                geo_variables=geo_variables,
+                                lsm_full_domain=data_lsm,
+                                topo_full_domain=data_topo,
+                                shuffle=True,
+                                cutouts=sample_w_cutouts,
+                                cutout_domains=cutout_domains if sample_w_cutouts else None,
+                                n_samples_w_cutouts=n_samples_train,
+                                sdf_weighted_loss=sample_w_sdf,
+                                scale=scaling,
+                                save_original=args.show_both_orig_scaled,
+                                conditional_seasons=sample_w_cond_season,
+                                n_classes=n_seasons,
+                                lr_data_size=tuple(lr_data_size) if lr_data_size is not None else None,
+                                lr_cutout_domains=tuple(lr_cutout_domains) if lr_cutout_domains is not None else None,
+                                )
     
-    # Set path to save figures
-    PATH_SAMPLES = PATH_SAVE + 'samples' + f'/Samples' + '__' + config_name
-    PATH_LOSSES = PATH_SAVE + '/losses'
-    PATH_FIGURES = PATH_SAMPLES + '/Figures/'
-    
-    if not os.path.exists(PATH_SAMPLES):
-        os.makedirs(PATH_SAMPLES)
-    if not os.path.exists(PATH_LOSSES):
-        os.makedirs(PATH_LOSSES)
-    if not os.path.exists(PATH_FIGURES):
-        os.makedirs(PATH_FIGURES)
+    valid_dataset = DANRA_Dataset_cutouts_ERA5_Zarr_test(
+                                hr_variable_dir_zarr=hr_data_dir_valid,
+                                hr_data_size=hr_data_size,
+                                n_samples=n_samples_valid,
+                                cache_size=cache_size_valid,
+                                hr_variable=hr_var,
+                                hr_scaling_method=hr_scaling_method,
+                                hr_scaling_params=hr_scaling_params,
+                                lr_conditions=lr_vars,
+                                lr_scaling_methods=lr_scaling_methods,
+                                lr_scaling_params=lr_scaling_params,
+                                lr_cond_dirs_zarr=lr_cond_dirs_valid,
+                                geo_variables=geo_variables,
+                                lsm_full_domain=data_lsm,
+                                topo_full_domain=data_topo,
+                                shuffle=False,
+                                cutouts=sample_w_cutouts,
+                                cutout_domains=cutout_domains if sample_w_cutouts else None,
+                                n_samples_w_cutouts=n_samples_valid,
+                                sdf_weighted_loss=sample_w_sdf,
+                                scale=scaling,
+                                save_original=args.show_both_orig_scaled,
+                                conditional_seasons=sample_w_cond_season,
+                                n_classes=n_seasons,
+                                lr_data_size=tuple(lr_data_size) if lr_data_size is not None else None,
+                                lr_cutout_domains=tuple(lr_cutout_domains) if lr_cutout_domains is not None else None,
+                                )
 
-    NAME_SAMPLES = 'Generated_samples' + '__' + save_str + '__' + 'epoch' + '_'
-    NAME_FINAL_SAMPLES = f'Final_generated_sample' + '__' + save_str
-    NAME_LOSSES = f'Training_losses' + '__' + save_str
+    gen_dataset = DANRA_Dataset_cutouts_ERA5_Zarr_test(
+                                hr_variable_dir_zarr=hr_data_dir_test,
+                                hr_data_size=hr_data_size,
+                                n_samples=n_samples_test,
+                                cache_size=cache_size_test,
+                                hr_variable=hr_var,
+                                hr_scaling_method=hr_scaling_method,
+                                hr_scaling_params=hr_scaling_params,
+                                lr_conditions=lr_vars,
+                                lr_scaling_methods=lr_scaling_methods,
+                                lr_scaling_params=lr_scaling_params,
+                                lr_cond_dirs_zarr=lr_cond_dirs_test,
+                                geo_variables=geo_variables,
+                                lsm_full_domain=data_lsm,
+                                topo_full_domain=data_topo,
+                                shuffle=True,
+                                cutouts=sample_w_cutouts,
+                                cutout_domains=cutout_domains if sample_w_cutouts else None,
+                                n_samples_w_cutouts=n_samples_test,
+                                sdf_weighted_loss=sample_w_sdf,
+                                scale=scaling,
+                                save_original=args.show_both_orig_scaled,
+                                conditional_seasons=sample_w_cond_season,
+                                n_classes=n_seasons,
+                                lr_data_size=tuple(lr_data_size) if lr_data_size is not None else None,
+                                lr_cutout_domains=tuple(lr_cutout_domains) if lr_cutout_domains is not None else None,
+                                )    
 
-
-    # Define the path to the pretrained model 
-    PATH_CHECKPOINT = args.path_checkpoint
-    try:
-        os.makedirs(PATH_CHECKPOINT)
-        print('\n\n\nCreating directory for saving checkpoints...')
-        print(f'Directory created at {PATH_CHECKPOINT}')
-    except FileExistsError:
-        print('\n\n\nDirectory for saving checkpoints already exists...')
-        print(f'Directory located at {PATH_CHECKPOINT}')
-
-
-    NAME_CHECKPOINT = save_str + '.pth.tar'
-
-    checkpoint_dir = PATH_CHECKPOINT
-    checkpoint_name = NAME_CHECKPOINT
-    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-    print(f'\nCheckpoint path: {checkpoint_path}')
-
-
-    # Define model hyperparameters
-    epochs = args.epochs
+    # Define batch size
     batch_size = args.batch_size
-    
-    if args.device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    else:
+
+    # Define the device to use
+    if args.device is not None:
         device = args.device
-    
-    last_fmap_channels = args.last_fmap_channels
-    time_embedding = args.time_embedding_size
-    
-    learning_rate = args.lr
-    min_lr = args.min_lr
-    weight_decay = args.weight_decay
-
-    # Define diffusion hyperparameters
-    n_timesteps = args.n_timesteps
-    beta_min = args.beta_min
-    beta_max = args.beta_max
-    beta_scheduler = args.beta_scheduler
-    # noise_variance = args.noise_variance # Defined above
-
-    # Define if samples should be moved around in the cutout domains
-    CUTOUTS = args.CUTOUTS
-    CUTOUT_DOMAINS = args.CUTOUT_DOMAINS
-
-    # Define the loss function
-    if loss_type == 'simple':
-        lossfunc = SimpleLoss()
-        use_sdf_weighted_loss = False
-    elif loss_type == 'hybrid':
-        lossfunc = HybridLoss(alpha=0.5, T=n_timesteps)#nn.MSELoss()#SimpleLoss()#
-        use_sdf_weighted_loss = False
-    elif loss_type == 'sdfweighted':
-        lossfunc = SDFWeightedMSELoss(max_land_weight=1.0, min_sea_weight=0.0)
-        use_sdf_weighted_loss = True
-        # NEED TO ACCOUNT FOR POSSIBILITY OF MULTIPLE DOMAINS
-
-
-    if args.LR_VARS is not None:
-        condition_on_img = True
     else:
-        condition_on_img = False
-
-    
-    # Define training dataset, with cutouts enabled and data from zarr files
-    train_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_train_w_cutouts_zarr, 
-                                            data_size=image_dim, 
-                                            n_samples=n_samples_train, 
-                                            cache_size=cache_size_train, 
-                                            variable=var,
-                                            shuffle=False,
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            n_samples_w_cutouts=n_samples_train,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss=use_sdf_weighted_loss,
-                                            scale=scaling, 
-                                            save_original=args.show_both_orig_scaled,
-                                            scale_mean=args.scale_mean,
-                                            scale_std=args.scale_std,
-                                            scale_min=args.scale_min,
-                                            scale_max=args.scale_max,
-                                            scale_min_log=args.scale_min_log,
-                                            scale_max_log=args.scale_max_log,
-                                            buffer_frac=args.buffer_frac,
-                                            conditional_seasons=condition_on_seasons,
-                                            conditional_images=condition_on_img,
-                                            cond_dir_zarr=data_dir_era5_train_zarr, 
-                                            n_classes=n_seasons
-                                            )
-    # Define validation dataset, with cutouts enabled and data from zarr files
-    valid_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_valid_w_cutouts_zarr, 
-                                            data_size=image_dim, 
-                                            n_samples=n_samples_valid, 
-                                            cache_size=cache_size_valid, 
-                                            variable=var,
-                                            shuffle=False,
-                                            cutouts=CUTOUTS, 
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            n_samples_w_cutouts=n_samples_valid,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss=use_sdf_weighted_loss,
-                                            scale=scaling,
-                                            save_original=args.show_both_orig_scaled,
-                                            scale_mean=args.scale_mean,
-                                            scale_std=args.scale_std,
-                                            scale_min=args.scale_min,
-                                            scale_max=args.scale_max,
-                                            scale_min_log=args.scale_min_log,
-                                            scale_max_log=args.scale_max_log,
-                                            buffer_frac=args.buffer_frac,
-                                            conditional_seasons=condition_on_seasons, 
-                                            conditional_images=condition_on_img,
-                                            cond_dir_zarr=data_dir_era5_valid_zarr,
-                                            n_classes=n_seasons, 
-                                            )
-    # Define test dataset, with cutouts enabled and data from zarr files
-    gen_dataset = DANRA_Dataset_cutouts_ERA5_Zarr(data_dir_zarr=data_dir_danra_test_w_cutouts_zarr,
-                                            data_size = image_dim,
-                                            n_samples = n_samples_test,
-                                            cache_size = cache_size_test,
-                                            variable=var,
-                                            shuffle=True,
-                                            cutouts=CUTOUTS,
-                                            cutout_domains=CUTOUT_DOMAINS,
-                                            n_samples_w_cutouts=n_samples_test,
-                                            lsm_full_domain=data_lsm,
-                                            topo_full_domain=data_topo,
-                                            sdf_weighted_loss = use_sdf_weighted_loss,
-                                            scale=scaling,
-                                            save_original=args.show_both_orig_scaled,
-                                            scale_mean=args.scale_mean,
-                                            scale_std=args.scale_std,
-                                            scale_min=args.scale_min,
-                                            scale_max=args.scale_max,
-                                            scale_min_log=args.scale_min_log,
-                                            scale_max_log=args.scale_max_log,
-                                            buffer_frac=args.buffer_frac,
-                                            conditional_seasons=condition_on_seasons, 
-                                            conditional_images=condition_on_img,    
-                                            cond_dir_zarr=data_dir_era5_test_zarr,
-                                            n_classes=n_seasons,
-                                            )
-
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'\nUsing device: {device}')
 
     # Define the torch dataloaders for train and validation
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)#, num_workers=args.num_workers)
@@ -371,7 +336,22 @@ def main_sbgm_new(args):
     n_gen_samples = args.n_gen_samples
     gen_dataloader = DataLoader(gen_dataset, batch_size=n_gen_samples, shuffle=False)#, num_workers=args.num_workers)
 
-    # Examine first batch from test dataloader
+
+    # Examine sample from train dataloader (sample is full batch)
+    print('\n')
+    sample = train_dataloader.dataset[0]
+    for key, value in sample.items():
+        try:
+            print(f'{key}: {value.shape}')
+        except AttributeError:
+            print(f'{key}: {value}')
+    print('\n\n')
+            
+
+    
+
+
+
 
     # Define the seed for reproducibility, and set seed for torch, numpy and random
     seed = 42
@@ -385,23 +365,40 @@ def main_sbgm_new(args):
     torch.backends.cudnn.benchmark = True
 
 
+    # Define model parameters
+    input_channels = len(lr_vars) # equal to number of LR variables
+    output_channels = 1 # equal to number of HR variables
+    last_fmap_channels = 512
+    time_embedding = 256
+    num_heads = 4
 
+    if lr_vars is not None:
+        sample_w_cond_img = True
+    else:
+        sample_w_cond_img = False
+
+
+    # Define hyper parameters
+    learning_rate = args.learning_rate
+    min_lr = args.min_lr
+    weight_decay = args.weight_decay
+    epochs = args.epochs
 
     # Define the encoder and decoder from modules_DANRA_downscaling.py
     encoder = Encoder(input_channels, 
                         time_embedding,
-                        cond_on_lsm=sample_w_lsm_topo,
-                        cond_on_topo=sample_w_lsm_topo,
+                        cond_on_lsm=sample_w_geo,
+                        cond_on_topo=sample_w_geo,
                         cond_on_img=sample_w_cond_img, 
-                        cond_img_dim=(1, args.LR_SIZE, args.LR_SIZE), 
+                        cond_img_dim=(len(lr_vars), lr_data_size[0], lr_data_size[1]),
                         block_layers=[2, 2, 2, 2], 
                         num_classes=n_seasons,
-                        n_heads=args.num_heads
+                        n_heads=num_heads
                         )
     decoder = Decoder(last_fmap_channels, 
                         output_channels, 
                         time_embedding, 
-                        n_heads=args.num_heads
+                        n_heads=num_heads
                         )
     score_model = ScoreNet(marginal_prob_std=marginal_prob_std_fn, encoder=encoder, decoder=decoder)
     score_model = score_model.to(device)
@@ -423,13 +420,13 @@ def main_sbgm_new(args):
 
 
     # Define the training pipeline
-    pipeline = TrainingPipeline_general(score_model,
+    pipeline = TrainingPipeline_general_new(score_model,
                                         loss_fn,
                                         marginal_prob_std_fn,
                                         optimizer,
                                         device,
                                         weight_init=True,
-                                        sdf_weighted_loss=sdf_weighted_loss
+                                        sdf_weighted_loss=sample_w_sdf
                                         )
     
     # Define learning rate scheduler
@@ -444,6 +441,26 @@ def main_sbgm_new(args):
                                                                   verbose = True
                                                                   )
         
+
+    # Setup specific names for saving
+    lr_vars_str = '_'.join(lr_vars)
+    save_str = (
+        f"{args.config_name}__"
+        f"HR_{hr_var}_{args.hr_model}__"
+        f"SIZE_{hr_data_size[0]}x{hr_data_size[1]}__"
+        f"LR_{lr_vars_str}_{args.lr_model}__"
+        f"LOSS_{args.loss_type}__"
+        f"HEADS_{num_heads}__"
+        f"TIMESTEPS_{args.n_timesteps}"
+    )
+
+    #Setup checkpoint path
+    checkpoint_dir = os.path.join(args.path_save, args.path_checkpoint)
+
+    checkpoint_name = save_str + '.pth.tar'
+
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
+
     # Check if path to pretrained model exists
     if os.path.isfile(checkpoint_path):
         print('\n\nLoading pretrained weights from checkpoint:')
@@ -451,6 +468,29 @@ def main_sbgm_new(args):
 
         checkpoint_state = torch.load(checkpoint_path, map_location=device)['network_params']
         pipeline.model.load_state_dict(checkpoint_state)
+    else:
+        print('\n\nNo pretrained weights found at checkpoint:')
+        print(checkpoint_dir)
+        print(f'Under name: {checkpoint_name}')
+        print('Starting training from scratch...\n\n')
+
+
+    # Set path to figures, samples, losses
+    path_samples = args.path_save + 'samples' + f'/Samples' + '__' + save_str
+    path_losses = args.path_save + '/losses'
+    path_figures = path_samples + '/Figures/'
+    
+    if not os.path.exists(path_samples):
+        os.makedirs(path_samples)
+    if not os.path.exists(path_losses):
+        os.makedirs(path_losses)
+    if not os.path.exists(path_figures):
+        os.makedirs(path_figures)
+
+    name_samples = 'Generated_samples' + '__' + save_str + '__' + 'epoch' + '_'
+    name_final_samples = f'Final_generated_sample' + '__' + save_str
+    name_losses = f'Training_losses' + '__' + save_str
+
 
     # Check if device is cude, if so print information and empty cache
     if torch.cuda.is_available():
@@ -466,8 +506,11 @@ def main_sbgm_new(args):
     # Set best loss to infinity
     best_loss = np.inf
 
+    
+
     print('\n\n\nStarting training...\n\n\n')
 
+    
     # Loop over epochs
     for epoch in range(epochs):
 
@@ -481,8 +524,8 @@ def main_sbgm_new(args):
         train_loss = pipeline.train(train_dataloader,
                                     verbose=False,
                                     PLOT_FIRST=PLOT_FIRST_IMG,
-                                    SAVE_PATH = PATH_SAMPLES,
-                                    SAVE_NAME = 'upsampled_images_example.png'
+                                    SAVE_PATH=path_samples,
+                                    SAVE_NAME='upsampled_images_example.png'
                                     )
         train_losses.append(train_loss)
 
@@ -496,9 +539,9 @@ def main_sbgm_new(args):
         print(f'\n\n\nTraining loss: {train_loss:.6f}')
         print(f'Validation loss: {valid_loss:.6f}\n\n\n')
         
-        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_train', 'wb') as fp:
+        with open(path_losses + '/' + name_losses + '_train', 'wb') as fp:
             pickle.dump(train_losses, fp)
-        with open(PATH_LOSSES + '/' + NAME_LOSSES + '_valid', 'wb') as fp:
+        with open(path_losses + '/' + name_losses + '_valid', 'wb') as fp:
             pickle.dump(valid_losses, fp)
 
         if args.create_figs:
@@ -514,7 +557,7 @@ def main_sbgm_new(args):
                 plt.show()
                 
             if args.save_figs:
-                fig.savefig(PATH_FIGURES + NAME_LOSSES + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
+                fig.savefig(path_figures + name_losses + '.png', dpi=600, bbox_inches='tight', pad_inches=0.1)
 
 
         # If validation loss is lower than best loss, save the model. With possibility of early stopping
@@ -525,10 +568,10 @@ def main_sbgm_new(args):
             print(f'Saved to: {checkpoint_path} with name {checkpoint_name}\n\n')
 
             # If create figures is enabled, create figures
-            if args.create_figs and n_gen_samples > 0 and epoch % args.plot_interval == 0:
-                if var == 'temp':
+            if args.create_figs and n_gen_samples > 0: # and epoch % args.plot_interval == 0:
+                if hr_var == 'temp':
                     cmap_var_name = 'plasma'
-                elif var == 'prcp':
+                elif hr_var == 'prcp':
                     cmap_var_name = 'inferno'
 
                 if epoch == 0:
@@ -603,7 +646,7 @@ def main_sbgm_new(args):
                                                 diffusion_coeff_fn,
                                                 sample_batch_size,
                                                 device=device,
-                                                img_size=image_size,
+                                                img_size=hr_data_size[0],
                                                 y=test_seasons,
                                                 cond_img=test_cond,
                                                 lsm_cond=test_lsm,
@@ -615,212 +658,212 @@ def main_sbgm_new(args):
                     data_plot.append(generated_samples)
                     data_names.append('Generated')
 
-                    # -----------------------------------------------------------
-                    # Create figure and axes
-                    # -----------------------------------------------------------
-                    fig, axs = plt.subplots(n_axs + 1, n_gen_samples, figsize=(n_axs*4, n_gen_samples*4))
+                    # # -----------------------------------------------------------
+                    # # Create figure and axes
+                    # # -----------------------------------------------------------
+                    # fig, axs = plt.subplots(n_axs + 1, n_gen_samples, figsize=(n_axs*4, n_gen_samples*4))
 
-                    # -----------------------------------------------------------
-                    # For each sample i, find local min/max for T, C and G only
-                    # -----------------------------------------------------------
-                    for i in range(n_gen_samples):
-                        # 1) Gather and (if necessary) back-transform single-sample images
-                        t_img, c_img, g_img = None, None, None
+                    # # -----------------------------------------------------------
+                    # # For each sample i, find local min/max for T, C and G only
+                    # # -----------------------------------------------------------
+                    # for i in range(n_gen_samples):
+                    #     # 1) Gather and (if necessary) back-transform single-sample images
+                    #     t_img, c_img, g_img = None, None, None
 
-                        # Indices in data_plot/dat_names
-                        try:
-                            idx_truth = data_names.index('Truth')
-                        except ValueError:
-                            idx_truth = None
-                        try:
-                            idx_cond = data_names.index('Condition')
-                        except ValueError:
-                            idx_cond = None
-                        idx_gen = data_names.index('Generated')
+                    #     # Indices in data_plot/dat_names
+                    #     try:
+                    #         idx_truth = data_names.index('Truth')
+                    #     except ValueError:
+                    #         idx_truth = None
+                    #     try:
+                    #         idx_cond = data_names.index('Condition')
+                    #     except ValueError:
+                    #         idx_cond = None
+                    #     idx_gen = data_names.index('Generated')
 
-                        # -- Truth --
-                        if idx_truth is not None:
-                            t_img = data_plot[idx_truth][i].squeeze()
-                            if transform_back_bf_plot:
-                                if var == 'temp':
-                                    t_img = ZScoreBackTransform(mean=args.scale_mean,
-                                                                std=args.scale_std)(t_img)
-                                elif var == 'prcp':
-                                    t_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
-                                                                glob_mean_log=args.scale_mean,
-                                                                glob_std_log=args.scale_std,
-                                                                glob_min_log=args.scale_min_log,
-                                                                glob_max_log=args.scale_max_log,
-                                                                buffer_frac=args.buffer_frac)(t_img)
-                            t_img = t_img.numpy()
+                    #     # -- Truth --
+                    #     if idx_truth is not None:
+                    #         t_img = data_plot[idx_truth][i].squeeze()
+                    #         if transform_back_bf_plot:
+                    #             if var == 'temp':
+                    #                 t_img = ZScoreBackTransform(mean=args.scale_mean,
+                    #                                             std=args.scale_std)(t_img)
+                    #             elif var == 'prcp':
+                    #                 t_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                    #                                             glob_mean_log=args.scale_mean,
+                    #                                             glob_std_log=args.scale_std,
+                    #                                             glob_min_log=args.scale_min_log,
+                    #                                             glob_max_log=args.scale_max_log,
+                    #                                             buffer_frac=args.buffer_frac)(t_img)
+                    #         t_img = t_img.numpy()
                         
-                        # -- Condition --
-                        if idx_cond is not None:
-                            c_img = data_plot[idx_cond][i].squeeze()
-                            if transform_back_bf_plot:
-                                if var == 'temp':
-                                    c_img = ZScoreBackTransform(mean=args.scale_mean,
-                                                                std=args.scale_std)(c_img)
-                                elif var == 'prcp':
-                                    c_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
-                                                                glob_mean_log=args.scale_mean,
-                                                                glob_std_log=args.scale_std,
-                                                                glob_min_log=args.scale_min_log,
-                                                                glob_max_log=args.scale_max_log,
-                                                                buffer_frac=args.buffer_frac)(c_img)
-                            c_img = c_img.numpy()
+                    #     # -- Condition --
+                    #     if idx_cond is not None:
+                    #         c_img = data_plot[idx_cond][i].squeeze()
+                    #         if transform_back_bf_plot:
+                    #             if var == 'temp':
+                    #                 c_img = ZScoreBackTransform(mean=args.scale_mean,
+                    #                                             std=args.scale_std)(c_img)
+                    #             elif var == 'prcp':
+                    #                 c_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                    #                                             glob_mean_log=args.scale_mean,
+                    #                                             glob_std_log=args.scale_std,
+                    #                                             glob_min_log=args.scale_min_log,
+                    #                                             glob_max_log=args.scale_max_log,
+                    #                                             buffer_frac=args.buffer_frac)(c_img)
+                    #         c_img = c_img.numpy()
                         
-                        # -- Generated --
-                        g_img = data_plot[idx_gen][i].squeeze()
-                        if transform_back_bf_plot:
-                            if var == 'temp':
-                                g_img = ZScoreBackTransform(mean=args.scale_mean,
-                                                            std=args.scale_std)(g_img)
-                            elif var == 'prcp':
-                                g_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
-                                                            glob_mean_log=args.scale_mean,
-                                                            glob_std_log=args.scale_std,
-                                                            glob_min_log=args.scale_min_log,
-                                                            glob_max_log=args.scale_max_log,
-                                                            buffer_frac=args.buffer_frac)(g_img)
-                        g_img = g_img.numpy()
+                    #     # -- Generated --
+                    #     g_img = data_plot[idx_gen][i].squeeze()
+                    #     if transform_back_bf_plot:
+                    #         if var == 'temp':
+                    #             g_img = ZScoreBackTransform(mean=args.scale_mean,
+                    #                                         std=args.scale_std)(g_img)
+                    #         elif var == 'prcp':
+                    #             g_img = PrcpLogBackTransform(scale_type=args.scale_type_prcp,
+                    #                                         glob_mean_log=args.scale_mean,
+                    #                                         glob_std_log=args.scale_std,
+                    #                                         glob_min_log=args.scale_min_log,
+                    #                                         glob_max_log=args.scale_max_log,
+                    #                                         buffer_frac=args.buffer_frac)(g_img)
+                    #     g_img = g_img.numpy()
 
-                        # If ocean hidden, mask out in images THEN compute vmin, vmax
-                        if (not args.show_ocean) and ('LSM' in data_names):
-                            idx_lsm = data_names.index('LSM')
-                            lsm_img_ = data_plot[idx_lsm][i].squeeze()
-                            lsm_img = lsm_img_.numpy() if torch.is_tensor(lsm_img_) else lsm_img_
-                            # Where lsm_img < 0.5, set to nan
-                            if t_img is not None:
-                                t_img = np.where(lsm_img < 0.5, np.nan, t_img)
-                            if c_img is not None:
-                                c_img = np.where(lsm_img < 0.5, np.nan, c_img)
-                            g_img = np.where(lsm_img < 0.5, np.nan, g_img)
+                    #     # If ocean hidden, mask out in images THEN compute vmin, vmax
+                    #     if (not args.show_ocean) and ('LSM' in data_names):
+                    #         idx_lsm = data_names.index('LSM')
+                    #         lsm_img_ = data_plot[idx_lsm][i].squeeze()
+                    #         lsm_img = lsm_img_.numpy() if torch.is_tensor(lsm_img_) else lsm_img_
+                    #         # Where lsm_img < 0.5, set to nan
+                    #         if t_img is not None:
+                    #             t_img = np.where(lsm_img < 0.5, np.nan, t_img)
+                    #         if c_img is not None:
+                    #             c_img = np.where(lsm_img < 0.5, np.nan, c_img)
+                    #         g_img = np.where(lsm_img < 0.5, np.nan, g_img)
 
-                        # 2) Determine local vmin, vmax across T, C, G for sample i
-                        tcg_list = []
-                        if t_img is not None:
-                            tcg_list.append(t_img)
-                        if c_img is not None:
-                            tcg_list.append(c_img)
-                        tcg_list.append(g_img)
-                        tcg_array = np.stack(tcg_list, axis=0)
+                    #     # 2) Determine local vmin, vmax across T, C, G for sample i
+                    #     tcg_list = []
+                    #     if t_img is not None:
+                    #         tcg_list.append(t_img)
+                    #     if c_img is not None:
+                    #         tcg_list.append(c_img)
+                    #     tcg_list.append(g_img)
+                    #     tcg_array = np.stack(tcg_list, axis=0)
 
-                        # Get non-nan min/max
-                        vmin_i = np.nanmin(tcg_array)
-                        vmax_i = np.nanmax(tcg_array)
-                        print(f'vmin: {vmin_i}, vmax: {vmax_i}')
+                    #     # Get non-nan min/max
+                    #     vmin_i = np.nanmin(tcg_array)
+                    #     vmax_i = np.nanmax(tcg_array)
+                    #     print(f'vmin: {vmin_i}, vmax: {vmax_i}')
 
-                        # 3) Plot row 0 (Generated)
+                    #     # 3) Plot row 0 (Generated)
                         
-                        # Create Axes divider for the top row (to allow for boxplot)
-                        divider = make_axes_locatable(axs[0, i])
-                        bax = divider.append_axes('right', size='10%', pad=0.1)
-                        cax = divider.append_axes('right', size='5%', pad=0.1)
+                    #     # Create Axes divider for the top row (to allow for boxplot)
+                    #     divider = make_axes_locatable(axs[0, i])
+                    #     bax = divider.append_axes('right', size='10%', pad=0.1)
+                    #     cax = divider.append_axes('right', size='5%', pad=0.1)
 
-                        # Use plot_settings for cmap and local scaling
-                        cmap_ = plot_settings['Generated']['cmap']
-                        vmin_ = vmin_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmin']
-                        vmax_ = vmax_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmax']
+                    #     # Use plot_settings for cmap and local scaling
+                    #     cmap_ = plot_settings['Generated']['cmap']
+                    #     vmin_ = vmin_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmin']
+                    #     vmax_ = vmax_i if plot_settings['Generated']['use_local_scale'] else plot_settings['Generated']['vmax']
 
-                        im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
-                        axs[0, i].set_title('Generated')
-                        axs[0, i].axis('off')
-                        axs[0, i].set_ylim([0, g_img.shape[0]])
+                    #     im_g = axs[0, i].imshow(g_img, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
+                    #     axs[0, i].set_title('Generated')
+                    #     axs[0, i].axis('off')
+                    #     axs[0, i].set_ylim([0, g_img.shape[0]])
                         
-                        # Colorbar on cax
-                        fig.colorbar(im_g, cax=cax)#, fraction=0.046, pad=0.04, orientation='vertical')
+                    #     # Colorbar on cax
+                    #     fig.colorbar(im_g, cax=cax)#, fraction=0.046, pad=0.04, orientation='vertical')
 
-                        # Boxplot on bax (exclude NaNs if ocean is masked)
-                        g_data_bp = g_img[~np.isnan(g_img)].flatten()
+                    #     # Boxplot on bax (exclude NaNs if ocean is masked)
+                    #     g_data_bp = g_img[~np.isnan(g_img)].flatten()
 
-                        mean_props = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
-                        median_props = dict(linestyle='-', linewidth=2, color='black')
-                        flier_props = dict(marker='o', markerfacecolor='none', markersize=2, markeredgecolor='darkgreen', alpha=0.4)
+                    #     mean_props = dict(marker='x', markerfacecolor='firebrick', markersize=5, markeredgecolor='firebrick')
+                    #     median_props = dict(linestyle='-', linewidth=2, color='black')
+                    #     flier_props = dict(marker='o', markerfacecolor='none', markersize=2, markeredgecolor='darkgreen', alpha=0.4)
                         
-                        bax.boxplot(g_data_bp,
-                                    vert=True,
-                                    widths=2,
-                                    showmeans=True,
-                                    meanprops=mean_props,
-                                    medianprops=median_props,
-                                    flierprops=flier_props,
-                                    )
-                        bax.set_xticks([])
-                        bax.set_yticks([])
-                        bax.set_frame_on(False)
+                    #     bax.boxplot(g_data_bp,
+                    #                 vert=True,
+                    #                 widths=2,
+                    #                 showmeans=True,
+                    #                 meanprops=mean_props,
+                    #                 medianprops=median_props,
+                    #                 flierprops=flier_props,
+                    #                 )
+                    #     bax.set_xticks([])
+                    #     bax.set_yticks([])
+                    #     bax.set_frame_on(False)
                         
 
 
-                        # 4) Plot the rest of the data_plot in subsequent rows
-                        for j in range(n_axs):
-                            dname = data_names[j]
-                            img_j_ = data_plot[j][i].squeeze()
-                            arr_np = img_j_.numpy() if torch.is_tensor(img_j_) else img_j_
+                    #     # 4) Plot the rest of the data_plot in subsequent rows
+                    #     for j in range(n_axs):
+                    #         dname = data_names[j]
+                    #         img_j_ = data_plot[j][i].squeeze()
+                    #         arr_np = img_j_.numpy() if torch.is_tensor(img_j_) else img_j_
 
-                            # If T or C present, reuse backtransformed and masked data
-                            if dname == 'Truth' and t_img is not None:
-                                arr_np = t_img
-                            elif dname == 'Condition' and c_img is not None:
-                                arr_np = c_img
+                    #         # If T or C present, reuse backtransformed and masked data
+                    #         if dname == 'Truth' and t_img is not None:
+                    #             arr_np = t_img
+                    #         elif dname == 'Condition' and c_img is not None:
+                    #             arr_np = c_img
                             
-                            divider = make_axes_locatable(axs[j+1, i])
+                    #         divider = make_axes_locatable(axs[j+1, i])
 
-                            # If T, C or G, do boxplot + colorbar
-                            if dname in ['Truth', 'Condition', 'Generated']:
-                                bax = divider.append_axes('right', size='10%', pad=0.1)
-                                cax = divider.append_axes('right', size='5%', pad=0.1)
-                            else:
-                                # only colorbar
-                                bax = None
-                                cax = divider.append_axes('right', size='5%', pad=0.1)
+                    #         # If T, C or G, do boxplot + colorbar
+                    #         if dname in ['Truth', 'Condition', 'Generated']:
+                    #             bax = divider.append_axes('right', size='10%', pad=0.1)
+                    #             cax = divider.append_axes('right', size='5%', pad=0.1)
+                    #         else:
+                    #             # only colorbar
+                    #             bax = None
+                    #             cax = divider.append_axes('right', size='5%', pad=0.1)
 
-                            # Get settings from dictinory
-                            cmap_ = plot_settings[dname]['cmap']
-                            if plot_settings[dname]['use_local_scale']:
-                                vmin_ = vmin_i
-                                vmax_ = vmax_i
-                            else:
-                                vmin_ = plot_settings[dname]['vmin']
-                                vmax_ = plot_settings[dname]['vmax']
-
-
-                            im_ = axs[j+1, i].imshow(arr_np, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
-                            axs[j+1, i].set_title(dname)
-                            axs[j+1, i].axis('off')
-                            axs[j+1, i].set_ylim([0, arr_np.shape[0]])
-                            fig.colorbar(im_, cax=cax)#, fraction=0.046, pad=0.04)
-
-                            if dname in ['Truth', 'Condition', 'Generated']:
-                                arr_bp = arr_np[~np.isnan(arr_np)].flatten()
-                                bax.boxplot(arr_bp,
-                                            vert=True,
-                                            widths=2,
-                                            showmeans=True,
-                                            meanprops=mean_props,
-                                            medianprops=median_props,
-                                            flierprops=flier_props
-                                            )
-                                bax.set_xticks([])
-                                bax.set_yticks([])
-                                bax.set_frame_on(False)
+                    #         # Get settings from dictinory
+                    #         cmap_ = plot_settings[dname]['cmap']
+                    #         if plot_settings[dname]['use_local_scale']:
+                    #             vmin_ = vmin_i
+                    #             vmax_ = vmax_i
+                    #         else:
+                    #             vmin_ = plot_settings[dname]['vmin']
+                    #             vmax_ = plot_settings[dname]['vmax']
 
 
-                    fig.tight_layout()
-                    if args.show_figs:
-                        plt.show()
+                    #         im_ = axs[j+1, i].imshow(arr_np, cmap=cmap_, vmin=vmin_, vmax=vmax_, interpolation='nearest')
+                    #         axs[j+1, i].set_title(dname)
+                    #         axs[j+1, i].axis('off')
+                    #         axs[j+1, i].set_ylim([0, arr_np.shape[0]])
+                    #         fig.colorbar(im_, cax=cax)#, fraction=0.046, pad=0.04)
+
+                    #         if dname in ['Truth', 'Condition', 'Generated']:
+                    #             arr_bp = arr_np[~np.isnan(arr_np)].flatten()
+                    #             bax.boxplot(arr_bp,
+                    #                         vert=True,
+                    #                         widths=2,
+                    #                         showmeans=True,
+                    #                         meanprops=mean_props,
+                    #                         medianprops=median_props,
+                    #                         flierprops=flier_props
+                    #                         )
+                    #             bax.set_xticks([])
+                    #             bax.set_yticks([])
+                    #             bax.set_frame_on(False)
+
+
+                    # fig.tight_layout()
+                    # if args.show_figs:
+                    #     plt.show()
                     
                     
-                    # Save figure
-                    if args.save_figs:
-                        if epoch == (epochs - 1):
-                            fig.savefig(PATH_FIGURES + NAME_FINAL_SAMPLES + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
-                            print(f'Saving final generated sample in {PATH_SAMPLES} as {NAME_FINAL_SAMPLES}.png')
-                        else:
-                            fig.savefig(PATH_FIGURES + NAME_SAMPLES + str(epoch+1) + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
-                            print(f'Saving generated samples in {PATH_FIGURES} as {NAME_SAMPLES}{epoch+1}.png')
+                    # # Save figure
+                    # if args.save_figs:
+                    #     if epoch == (epochs - 1):
+                    #         fig.savefig(path_figures + name_final_samples + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
+                    #         print(f'Saving final generated sample in {path_samples} as {name_final_samples}.png')
+                    #     else:
+                    #         fig.savefig(path_figures + name_samples + str(epoch+1) + '.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
+                    #         print(f'Saving generated samples in {path_figures} as {name_samples}{epoch+1}.png')
                     
-                    break
+                    # break
                 
                 # Set model back to train mode
                 pipeline.model.train()

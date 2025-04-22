@@ -13,7 +13,7 @@ export PYTHONPATH=$(dirname "$0")/..
 # HR parameters
 HR_MODEL="DANRA"
 HR_VAR="prcp"
-HR_DIM="128"
+HR_DIM="[128,128]"
 HR_SCALING_METHOD="log_minus1_1"
 HR_SCALING_PARAMS='{"glob_min": 0, "glob_max": 160, "glob_min_log": -20, "glob_max_log": 10, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}'
 # HR cutout domain (e.g. for HR images over Denmark)
@@ -47,6 +47,7 @@ SAMPLE_W_COND_SEASON="true"                             # if true, sample with s
 SAMPLE_W_SDF="true"                                     # if true, sample with SDF (for loss weighting)
 SCALING="true"                                          # if true, scale the data         
 PATH_DATA="/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/" # Path to the data
+FULL_DOMAIN_DIMS="[589, 789]"                           # full domain dimensions (to locate full domain dataset)
 SAVE_FIGS="true"                                        # if true, save the figures
 SPECIFIC_FIG_NAME="test__plot_fct" # Name of the specific figure to save
 SHOW_FIGS="true"                                        # if true, show the figures                
@@ -68,7 +69,7 @@ NUM_WORKERS="4"                                         # number of workers for 
 python ${PYTHONPATH}/dataset_test.py \
     --hr_model "$HR_MODEL" \
     --hr_var "$HR_VAR" \
-    --hr_dim "$HR_DIM" \
+    --hr_data_size "$HR_DIM" \
     --hr_scaling_method "$HR_SCALING_METHOD" \
     --hr_scaling_params "$HR_SCALING_PARAMS" \
     --cutout_domains "$CUTOUT_DOMAINS" \
@@ -85,6 +86,7 @@ python ${PYTHONPATH}/dataset_test.py \
     --sample_w_sdf "$SAMPLE_W_SDF" \
     --scaling "$SCALING" \
     --path_data "$PATH_DATA" \
+    --full_domain_dims "$FULL_DOMAIN_DIMS" \
     --save_figs "$SAVE_FIGS" \
     --specific_fig_name "$SPECIFIC_FIG_NAME" \
     --show_figs "$SHOW_FIGS" \
