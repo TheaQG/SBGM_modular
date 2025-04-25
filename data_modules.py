@@ -12,6 +12,8 @@ import re
 import random, torch
 import numpy as np
 import multiprocessing
+from typing import Tuple
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision import transforms
 from scipy.ndimage import distance_transform_edt as distance
@@ -235,6 +237,47 @@ def random_crop(data, target_size):
     y = random.randint(0, H - target_size[0])
     x = random.randint(0, W - target_size[1])
     return data[y:y + target_size[0], x:x + target_size[1]]
+
+
+def make_tensor_resize(target_size):
+    """
+        Create a transform that resizes a tensor to the target size.
+        Necessary because the Resize transform in torchvision expects a PIL image.
+        Resize otherwise silently no-ops on a 2D tensor.
+    """
+    return transforms.Lambda(
+        lambda t:
+        F.interpolate(
+            t.unsqueeze(0), # [1, C, H, W]
+            size=target_size, # (new_height, new_width)
+            mode='bilinear', # Or 'nearest' or 'bicubic' etc
+            align_corners=False,
+        ).squeeze(0)        # Back to [C, H, W]
+    )
+
+class ResizeTensor:
+    """
+        Create a transform that resizes a tensor to the target size.
+        Necessary because the Resize transform in torchvision expects a PIL image.
+        Resize otherwise silently no-ops on a 2D tensor.
+        
+        Resize a torch.Tensor of shape [C,H,W] to [C,new_H,new_W]
+        by torch.nn.functional.interpolate.  No PIL, no 8-bit quantization.
+    """
+    def __init__(self, size, mode='bilinear', align_corners=False):
+        self.size = size
+        self.mode = mode
+        self.align_corners = align_corners
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [C, H, W]  → add batch dim → [1, C, H, W]
+        y = x.unsqueeze(0)
+        # interpolate → [1, C, new_H, new_W]
+        y = F.interpolate(y, size=self.size, mode=self.mode, align_corners=self.align_corners)
+        # remove batch dim → [C, new_H, new_W]
+        return y.squeeze(0)
+
+
 
 class DANRA_Dataset_cutouts_ERA5_Zarr(Dataset):
     '''
@@ -738,20 +781,23 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
     def __init__(self, 
                 # Must-have parameters
                 hr_variable_dir_zarr:str,           # Path to high resolution data
-                hr_data_size:tuple,                    # Size of data (2D image, tuple)
+                hr_data_size:tuple,                 # Size of data (2D image, tuple)
                 # HR target variable and its scaling parameters
                 hr_variable:str = 'temp',           # Variable to load (temp or prcp)
+                hr_model:str = 'DANRA',             # Model name (e.g. 'DANRA', 'ERA5')
                 hr_scaling_method:str = 'zscore',   # Scaling method for high resolution data
                 hr_scaling_params:dict = {'glob_mean':8.69251, 'glob_std':6.192434}, # Scaling parameters for high resolution data (if prcp, 'log_minus1_1' or 'log_01' include 'glob_min_log' and 'glob_max_log' and optional buffer_frac)
                 # LR conditions and their scaling parameters (not including geo variables. they are handled separately)
-                lr_conditions:list = ['temp'], # Variables to load as low resolution conditions
+                lr_conditions:list = ['temp'],      # Variables to load as low resolution conditions
+                lr_model:str = 'ERA5',              # Model name (e.g. 'DANRA', 'ERA5')
                 lr_scaling_methods:list = ['zscore'], # Scaling methods for low resolution conditions
                 lr_scaling_params:list = [{'glob_mean':8.69251, 'glob_std':6.192434}], # Scaling parameters for low resolution conditions
-                lr_cond_dirs_zarr:dict = None,           # Path to directories containing conditional data (in format dict({'condition1':dir1, 'condition2':dir2}))
+                lr_cond_dirs_zarr:dict = None,      # Path to directories containing conditional data (in format dict({'condition1':dir1, 'condition2':dir2}))
                 # NEW: LR conditioning area size (if cropping is desired)
                 lr_data_size: tuple = None,         # Size of low resolution data (2D image, tuple), e.g. (589,789) for full LR domain
                 # Optionally a separate cutout domain for LR conditions
-                lr_cutout_domains: list = None,    # Domains to use for cutouts for LR conditions
+                lr_cutout_domains: list = None,     # Domains to use for cutouts for LR conditions
+                resize_factor: int = 1,             # Resize factor for input conditions (1 for full HR size, 2 for half HR size, etc. Mainly used for testing on smaller data)
                 # Geo variables (stationary) and their full domain arrays
                 geo_variables:list = ['lsm', 'topo'], # Geo variables to load
                 lsm_full_domain = None,             # Land-sea mask of full domain
@@ -767,8 +813,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 scale:bool = True,                  # Whether to scale data to new interval
                 save_original:bool = False,         # Whether to save original data
                 conditional_seasons:bool = False,   # Whether to use seasonal conditional sampling
-                n_classes:int = None               # Number of classes for conditional sampling
-                ):                       
+                n_classes:int = None                # Number of classes for conditional sampling
+                ):                          
         '''
         Initializes the dataset.
         '''
@@ -794,6 +840,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 lr_scaling_methods.pop(idx)
                 lr_scaling_params.pop(idx)
         self.lr_conditions = lr_conditions
+        self.lr_model = lr_model
         self.lr_scaling_methods = lr_scaling_methods
         self.lr_scaling_params = lr_scaling_params
         # If any conditions exist, set with_conditions to True
@@ -812,6 +859,17 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         
         # Specify target LR size (if different from HR size)
         self.target_lr_size = self.lr_data_size if self.lr_data_size is not None else self.hr_data_size
+        
+        # Resize factor for input conditions (for running with smaller data)
+        self.resize_factor = resize_factor
+        if self.resize_factor > 1:
+            self.hr_size_reduced = (int(self.hr_data_size[0]/self.resize_factor), int(self.hr_data_size[1]/self.resize_factor))
+            self.lr_size_reduced = (int(self.target_lr_size[0]/self.resize_factor), int(self.target_lr_size[1]/self.resize_factor))
+        elif self.resize_factor == 1:
+            self.hr_size_reduced = self.hr_data_size
+            self.lr_size_reduced = self.target_lr_size
+        else:
+            raise ValueError('Resize factor must be greater than 0')
 
 
         # Save LR condition directories
@@ -833,6 +891,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
 
         # HR target variable parameters
         self.hr_variable = hr_variable
+        self.hr_model = hr_model
         self.hr_scaling_method = hr_scaling_method
         self.hr_scaling_params = hr_scaling_params
         
@@ -902,7 +961,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 # Base transform: to tensor and resize
                 transform_list = [
                     transforms.ToTensor(),
-                    transforms.Resize(self.target_lr_size, antialias=True)
+                    ResizeTensor(self.lr_size_reduced)
                 ]
                 # Use per-variable buffer_frac
                 buff = params.get('buffer_frac', 0.5)
@@ -923,14 +982,14 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         else:
             self.transforms_dict = {cond: transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(self.target_lr_size, antialias=True)
+                ResizeTensor(self.lr_size_reduced)
             ]) for cond in self.lr_conditions}
 
         # Build transform for the HR target variable similarly
         if self.scale:
             hr_transform_list = [
                 transforms.ToTensor(),
-                transforms.Resize(self.hr_data_size, antialias=True)
+                ResizeTensor(self.hr_size_reduced)
             ]
             hr_buff = self.hr_scaling_params.get('buffer_frac', 0.5)
             if self.hr_scaling_method == 'zscore':
@@ -949,7 +1008,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
         else:
             self.hr_transform = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(self.hr_data_size, antialias=True)
+                ResizeTensor(self.hr_size_reduced)
             ])
 
         # Build a transform for the geo variables, with possible scaling  to [0,1]
@@ -957,19 +1016,19 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             self.geo_transform_topo = transforms.Compose([
                 transforms.Lambda(lambda x: np.ascontiguousarray(x)), # To make sure np.flipud is not messing up the tensor
                 transforms.ToTensor(),
-                transforms.Resize(self.target_lr_size, antialias=True),
+                ResizeTensor(self.lr_size_reduced),
                 Scale(0, 1, self.topo_full_domain.min(), self.topo_full_domain.max())
             ])
             self.geo_transform_lsm = transforms.Compose([
                 transforms.Lambda(lambda x: np.ascontiguousarray(x)), # To make sure np.flipud is not messing up the tensor
                 transforms.ToTensor(),
-                transforms.Resize(self.target_lr_size, antialias=True),
+                ResizeTensor(self.lr_size_reduced),
             ])
         else:
             self.geo_transform_topo = transforms.Compose([
                 transforms.Lambda(lambda x: np.ascontiguousarray(x)), # To make sure np.flipud is not messing up the tensor
                 transforms.ToTensor(),
-                transforms.Resize(self.target_lr_size, antialias=True)
+                ResizeTensor(self.lr_size_reduced)
             ])
             self.geo_transform_lsm = self.geo_transform_topo
     
@@ -1076,7 +1135,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             if self.lr_data_size is not None:
                 # If a separate LR cutout domain is provided, use it
                 if self.lr_cutout_domains is not None:
-                    lr_point = find_rand_points(self.lr_cutout_domains, self.target_lr_size)
+                    lr_point = find_rand_points(self.lr_cutout_domains, self.lr_data_size)
                 else:
                     # Otherwise default to the same cutout point as HR
                     lr_point = hr_point
@@ -1088,6 +1147,8 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             hr_point = None
             lr_point = None
 
+        # print(f'HR point: {hr_point}')
+        # print(f'LR point: {lr_point}')
         # Look up HR file using the common date
         hr_file_name = self.hr_file_map[date]
 
@@ -1130,7 +1191,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             if self.cutouts and data is not None:
                 # lr_point is in format [x1, x2, y1, y2] - note: for slicing, use [y1:y2, x1:x2]
                 data = data[lr_point[0]:lr_point[1], lr_point[2]:lr_point[3]]
-            print(f"Data shape for {cond}: {data.shape if data is not None else None}")
+            # print(f"Data shape for {cond}: {data.shape if data is not None else None}")
                 
             # If save_original is True, save original conditional data
             if self.save_original:
@@ -1140,7 +1201,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             if data is not None and self.transforms_dict.get(cond, None) is not None:
                 data = self.transforms_dict[cond](data)
             sample_dict[cond + "_lr"] = data
-        print('\n')
+        # print('\n')
 
         # Load HR target variable data
         try:
@@ -1183,7 +1244,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
             # Separate geo transform, with resize to HR size
             geo_transform_lsm_hr = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(self.hr_data_size, antialias=True)
+                ResizeTensor(self.hr_size_reduced)
             ])
             lsm_hr = geo_transform_lsm_hr(lsm_hr)
             sample_dict['lsm_hr'] = lsm_hr
@@ -1196,13 +1257,13 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                     if self.lsm_full_domain is None:
                         raise ValueError("lsm_full_domain must be provided if 'lsm' is in geo_variables")
                     geo_data = self.lsm_full_domain
-                    print('lsm_full_domain shape:', geo_data.shape)
+                    # print('lsm_full_domain shape:', geo_data.shape)
                     geo_transform = self.geo_transform_lsm
                 elif geo == 'topo':
                     if self.topo_full_domain is None:
                         raise ValueError("topo_full_domain must be provided if 'topo' is in geo_variables")
                     geo_data = self.topo_full_domain
-                    print('topo_full_domain shape:', geo_data.shape)
+                    # print('topo_full_domain shape:', geo_data.shape)
                     geo_transform = self.geo_transform_topo
                 else:
                     # Add custom logic for other geo variables when needed
@@ -1237,7 +1298,7 @@ class DANRA_Dataset_cutouts_ERA5_Zarr_test(Dataset):
                 else:
                     raise ValueError('n_classes must be 4, 12 or 365')
             # Convert classifier to tensor
-            classifier = torch.tensor(classifier)
+            classifier = torch.tensor(classifier, dtype=torch.long)
             sample_dict['classifier'] = classifier
         else:
             sample_dict['classifier'] = None

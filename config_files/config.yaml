@@ -43,3 +43,34 @@ lr_scaling_params:
 
 # Dataset and sampling options
 n_samples: 4
+cache_size: 365
+shuffle: false
+cutouts: true
+cutout_domains: [170, 350, 340, 520]
+lr_data_size: [589, 789]
+lr_cutout_domains: null # if null, HR cutout domain is used for LR too
+
+# Training hyperparameters
+epochs: 100
+batch_size: 32
+last_fmap_channels: 512
+time_embedding_size: 128
+num_heads: 4
+lr: 1e-4
+min_lr: 1e-6
+weight_decay: 0.01
+n_timesteps: 1000
+
+# Paths for saving etc.
+path_data: "/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/Data/Data_DiffMod/"
+path_save: "/Users/au728490/Library/CloudStorage/OneDrive-Aarhusuniversitet/PhD_AU/Python_Scripts/DiffusionModels/SBGM_modular/"
+path_checkpoint: "model_checkpoints/"
+
+# Other options
+sample_w_geo: true
+sample_w_cutouts: true
+sample_w_cond_season: true
+sample_w_sdf: true
+scaling: true
+noise_variance: 0.03
+transform_back_bf_plot: true

@@ -1,12 +1,14 @@
-import os, tqdm, torch
+import os, torch, sys
 import torch.nn as nn
 import copy
 
 from torch.cuda.amp import autocast, GradScaler
+from tqdm.auto import tqdm
 
+import matplotlib.pyplot as plt
 from utils import *
 from data_modules import *
-from score_unet import *
+from score_unet import loss_fn
 from score_sampling import *
 
 class TrainingPipeline_general_new:
@@ -29,13 +31,14 @@ class TrainingPipeline_general_new:
         '''
             Initialize the training pipeline.
             Args:
-                model: PyTorch model to be trained.
-                loss_fn: Loss function for the model.
+                model: PyTorch model to be trained. 
+                loss_fn: Loss function for the model. 
                 optimizer: Optimizer for the model.
                 device: Device to run the model on.
                 weight_init: Weight initialization method.
                 custom_weight_initializer: Custom weight initialization method.
                 sdf_weighted_loss: Boolean to use SDF weighted loss.
+                with_ema: Boolean to use Exponential Moving Average (EMA) for the model.
         '''
 
         # Set class variables
@@ -124,34 +127,23 @@ class TrainingPipeline_general_new:
                 SAVE_NAME: Name of the image to save.
                 use_mixed_precision: Boolean to use mixed precision training.
         '''
+                # If plot first, then plot an example of the data
 
+        
         # Set model to training mode
         self.model.train()
         # Set initial loss to 0
-        loss = 0.0
+        loss_sum = 0.0
 
         # Check if cuda is available and set scaler for mixed precision training if needed
-        if torch.cuda.is_available() and use_mixed_precision:
-            self.scaler = GradScaler()
-        else:
-            self.scaler = None
-
-        # Get information on variable for plotting
-        var = dataloader.dataset.hr_variable
-
-        # Set colormaps depending on variable
-        if var == 'temp':
-            cmap = 'plasma'
-            cmap_label = 'Temperature [°C]'
-        elif var == 'prcp':
-            cmap = 'inferno'
-            cmap_label = 'Precipitation [mm/day]'
+        self.scaler = GradScaler() if torch.cuda.is_available() and use_mixed_precision else None
 
         # Iterate through batches in dataloader (tuple of images and seasons)
-        for idx, samples in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        for idx, samples in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):#enumerate(pbar, start=1):
             # Samples is a dict with following available keys: 'img', 'classifier', 'img_cond', 'lsm', 'sdf', 'topo', 'points'
             # Extract samples
-            x, seasons, cond_images, lsm, sdf, topo, hr_points, lr_points = extract_samples(samples, self.device)
+            x, seasons, cond_images, lsm_hr, lsm, sdf, topo, hr_points, lr_points = extract_samples(samples, self.device)
+            
 
             
             # Zero gradients
@@ -190,14 +182,18 @@ class TrainingPipeline_general_new:
                 self.optimizer.step()
 
             # Add batch loss to total loss
-            loss += batch_loss.item()
+            loss_sum += batch_loss.item()
+            # Update the bar
+            # pbar.set_postfix(loss=f"{batch_loss.item():.4f}")
+        
+        # pbar.close()
 
         # Calculate average loss
-        avg_loss = loss / len(dataloader)
+        avg_loss = loss_sum / len(dataloader)
 
         # Print average loss if verbose
         if verbose:
-            print(f'Training Loss: {avg_loss}')
+            print(f"→ Epoch {getattr(self, 'epoch', '?')}: Avg. training Loss: {avg_loss:.4f}")
 
         return avg_loss
     

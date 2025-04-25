@@ -222,8 +222,16 @@ class Encoder(ResNet):
             Forward function for the class. The input x and time embedding t are used to calculate the output.
             The output is the encoded input x.
             Input:
-                - x: input tensor
-                - t: time embedding tensor
+                - x: input tensor, noised image
+                - t: time embedding tensor, time step
+                - y: label tensor, optional
+                - cond_img: conditional image tensor, optional (must be concatenated correctly, if multiple channels)
+                - lsm_cond: conditional tensor for land-sea mask, optional
+                - topo_cond: conditional tensor for elevation, optional
+
+            Output:
+                - fmap1, fmap2, fmap3, fmap4, fmap5: feature maps
+
         '''
         # Send the input to the device
         x = x.to(self.device)
@@ -237,10 +245,16 @@ class Encoder(ResNet):
             x = torch.cat([x, topo_cond], dim=1)
 
         if cond_img is not None:
+
             cond_img = cond_img.to(self.device)
+            # print('\n\nCond image shape: ', cond_img.shape)
+            # print('Input shape: ', x.shape)
+            # print('Concatenating conditional image to input')
+            # Concatenate the conditional image to the input
             x = torch.cat((x, cond_img), dim=1)
             #x = x.to(torch.double)
             #print('\n Conditional image added to input with dtype: ', x.dtype, '\n')
+
 
         # Send the inputs to the device
         x = x.to(self.device)

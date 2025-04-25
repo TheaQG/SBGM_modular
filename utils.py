@@ -27,6 +27,7 @@ import torch
 import zarr
 import os
 import json
+import yaml
 
 import netCDF4 as nc
 import torch.nn as nn
@@ -364,16 +365,20 @@ def extract_samples(samples, device=None):
 
     # HR image (choose key ending with '_hr' not containing 'original')
     hr_keys = [k for k in samples.keys() if k.endswith('_hr') and not k.endswith('_original')]
+    # If key 'lsm_hr' in hr_keys, remove it
+    if 'lsm_hr' in hr_keys:
+        hr_keys.remove('lsm_hr')
+    
     if len(hr_keys) == 0:
         raise ValueError('No HR image found in samples dictionary.')
     hr_img = samples[hr_keys[0]].to(device).float()
-    if len(hr_keys) > 1:
-        print(f'Warning: Multiple HR images found. Using the first one: {hr_keys[0]}')
+    # if len(hr_keys) > 1:
+    #     print(f'Warning: Multiple HR images found. Using the first one: {hr_keys[0]}')
     
     # Classifier (if available)
     classifier = samples.get('classifier', None)
     if classifier is not None:
-        classifier = classifier.to(device).float()
+        classifier = classifier.to(device)#.float()
 
     # LR conditions: if multiple, stack along channel dimensio
     lr_keys = [k for k in samples.keys() if k.endswith('_lr') and not k.endswith('_original')]
@@ -383,7 +388,7 @@ def extract_samples(samples, device=None):
         lr_img = samples[lr_keys[0]].to(device).float()
     else:
         lr_list = [samples[k].to(device).float() for k in sorted(lr_keys)]
-        lr_img = torch.cat(lr_list, dim=0)
+        lr_img = torch.cat(lr_list, dim=1)
 
     # HR mask (LSM)
     lsm_hr = samples.get('lsm_hr', None)
@@ -511,6 +516,11 @@ def str2list(v):
         except Exception:
             # If JSON loading fails, fallback to splitting
             pass
+
+    # If input is None, return None
+    if v is None:
+        return None
+
     # Fallback: split on commas and try to convert each element.
     items = [x.strip() for x in v.split(',')]
     result = []
@@ -640,7 +650,7 @@ def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
                 base = key[:-3]
             elif key.endswith('_lr_original'):
                 base = key[:-12]
-            print(f"Base: {base}")
+            # print(f"Base: {base}")
             if lr_cmap_dict is not None and base in lr_cmap_dict:
                 cmap = lr_cmap_dict[base]
             else:
@@ -665,6 +675,30 @@ def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
         ax.invert_yaxis()  # Invert y-axis to match the original image orientation
         ax.set_xticks([])
         ax.set_yticks([])
+
+        # Set column title
+        if key.endswith('_hr'):
+            title = f"HR {hr_model} ({var})\nscaled"
+        elif key.endswith('_hr_original'):
+            title = f"HR {hr_model} ({var})\noriginal [{hr_units}]"
+        elif key.endswith('_lr'):
+            title = f"LR {lr_model} ({base})\nscaled"
+        elif key.endswith('_lr_original'):
+            title = f"LR {lr_model} ({base})\noriginal [{lr_units[lr_keys.index(base)]}]"
+        elif key in extra_keys:
+            if key == "topo":
+                title = f"Topography"
+            elif key == "sdf":
+                title = f"SDF"
+            elif key == "lsm":
+                title = f"Land/Sea Mask"
+            else:
+                title = f"{key}"
+        else:
+            title = f"{key}"
+        ax.set_title(title, fontsize=10)
+
+
 
         # Create an axes divider to add a colorbar and (for variable images) a boxplot
         divider = make_axes_locatable(ax)
@@ -703,17 +737,21 @@ def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
 
     fig.tight_layout()
 
-    return fig
+    return fig, ax
 
-def plot_samples(sample_list, hr_model, hr_units, lr_model, lr_units, var,
-                         show_ocean=False, force_matching_scale=True, 
-                         global_min=None, global_max=None, extra_keys=None, 
-                         hr_cmap='plasma', 
-                         lr_cmap_dict=None,  # e.g., {"prcp": "inferno", "temp": "plasma"}
-                         default_lr_cmap='viridis',
-                         extra_cmap_dict=None,  # e.g., {"topo": "terrain", "lsm": "binary", "sdf": "coolwarm"}
-                         n_samples_threshold=3,
-                         figsize=(15, 8)):
+def plot_samples(samples, hr_model, hr_units, 
+                        lr_model, lr_units,
+                        var,
+                        show_ocean=False,
+                        force_matching_scale=True,
+                        global_min=None, global_max=None,
+                        extra_keys=None, 
+                        hr_cmap='plasma', 
+                        lr_cmap_dict=None,  # e.g., {"prcp": "inferno", "temp": "plasma"}
+                        default_lr_cmap='viridis',
+                        extra_cmap_dict=None,  # e.g., {"topo": "terrain", "lsm": "binary", "sdf": "coolwarm"}
+                        n_samples_threshold=3,
+                        figsize=(15, 8)):
     """
     Plot a batch of samples (provided as a list of sample dictionaries) in a grid where each row is a sample and
     each column corresponds to a particular key (e.g., HR, LR, originals, geo).
@@ -743,10 +781,38 @@ def plot_samples(sample_list, hr_model, hr_units, lr_model, lr_units, var,
     """
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    # Limit the number of samples to plot if necessary.
-    if len(sample_list) > n_samples_threshold:
-        print(f"Plotting first {n_samples_threshold} samples out of {len(sample_list)} provided.")
-        sample_list = sample_list[:n_samples_threshold]
+    # If single batch dict is passed, unpack it to a list
+    if isinstance(samples, dict):
+        # Figure out batch size from first tensor we find:
+        for v in samples.values():
+            if torch.is_tensor(v):
+                batch_size = v.shape[0]
+                break
+            if isinstance(v, list) and all(torch.is_tensor(x) for x in v):
+                batch_size = len(v)
+                break
+            else:
+                raise ValueError("No tensor found in the sample dictionary.")
+        
+        sample_list = []
+        for i in range(batch_size):
+            single = {}
+            for k, v in samples.items():
+                if torch.is_tensor(v):
+                    # Slice tensor on batch dim
+                    single[k] = v[i]
+                elif isinstance(v, (list, tuple)) and len(v) == batch_size:
+                    # Truly per-sample list
+                    single[k] = v[i]
+                else:
+                    # Some constant list or metadata: leave as-is
+                    single[k] = v
+            sample_list.append(single)
+    else:
+        sample_list = samples
+
+    # print(f"Plotting first {n_samples_threshold} samples out of {len(sample_list)} provided.")
+    sample_list = sample_list[:n_samples_threshold]
     
     # Construct the keys:
     # HR key is "var_hr" (e.g., "prcp_hr")
@@ -869,4 +935,12 @@ def plot_samples(sample_list, hr_model, hr_units, lr_model, lr_units, var,
                     title = f"{key}"
                 ax.set_title(title, fontsize=10)
     fig.tight_layout()
-    return fig
+    return fig, axs
+
+def load_config(yaml_file):
+    """
+        Loads a YAML configuration file and returns a dictionary
+    """
+    with open(yaml_file, 'r') as f:
+        config = yaml.safe_load(f)
+        return config
