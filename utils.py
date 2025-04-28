@@ -618,6 +618,7 @@ def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
 
     # Create subplots in one row (one column per key)
     fig, axs = plt.subplots(1, n_keys, figsize=figsize)
+    fig.suptitle(f"Sample from train dataset, {var} (HR: {hr_model}, LR: {lr_model})", fontsize=16)
     # Ensure axs is iteravle (if only one subplot, wrap in list)
     if n_keys == 1:
         axs = [axs]
@@ -733,7 +734,6 @@ def plot_sample(sample, hr_model, hr_units, lr_model, lr_units, var,
             bax = None
 
         fig.colorbar(im, cax=cax, orientation='vertical')
-        ax.set_title(f"{key} ({var})", fontsize=10)
 
     fig.tight_layout()
 

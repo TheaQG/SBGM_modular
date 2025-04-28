@@ -38,19 +38,19 @@ def launch_from_args_new():
     parser.add_argument('--hr_scaling_params', type=str, default='{"glob_min": 0, "glob_max": 160, "glob_min_log": -20, "glob_max_log": 10, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}',# '{"glob_mean": 8.69251, "glob_std": 6.192434}', # 
                         help='The scaling parameters for the HR variable, in JSON-like string format dict') #
     parser.add_argument('--lr_model', type=str, default='ERA5', help='The LR model to use')
-    parser.add_argument('--lr_conditions', type=str2list, default=["prcp",],
-                                                                #    "temp"],#,
+    parser.add_argument('--lr_conditions', type=str2list, default=["prcp",#],
+                                                                   "temp"],#,
                                                                 #    "ewvf",#],
                                                                 #    "nwvf"],
                         help='List of LR condition variables')
-    parser.add_argument('--lr_scaling_methods', type=str2list, default=["log_minus1_1",],
-                                                                        # "zscore"],#],
+    parser.add_argument('--lr_scaling_methods', type=str2list, default=["log_minus1_1",#],
+                                                                        "zscore"],#],
                                                                         # "zscore",#],
                                                                         # "zscore"],
                         help='List of scaling methods for LR conditions')
     # Scaling params are provided as JSON-like strings
-    parser.add_argument('--lr_scaling_params', type=str2list, default=['{"glob_min": 0, "glob_max": 70, "glob_min_log": -10, "glob_max_log": 5, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}',],#
-                                                                    #    '{"glob_mean": 8.69251, "glob_std": 6.192434}'],#'{"glob_min": 0, "glob_max": 70, "glob_min_log": -10, "glob_max_log": 5, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}'],#,
+    parser.add_argument('--lr_scaling_params', type=str2list, default=['{"glob_min": 0, "glob_max": 70, "glob_min_log": -10, "glob_max_log": 5, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}',#],
+                                                                       '{"glob_mean": 8.69251, "glob_std": 6.192434}'],#'{"glob_min": 0, "glob_max": 70, "glob_min_log": -10, "glob_max_log": 5, "glob_mean_log": -25.0, "glob_std_log": 10.0, "buffer_frac": 0.5}'],#,
                                                                     #    '{"glob_mean": 0.0, "glob_std": 500.0}',#],
                                                                     #    '{"glob_mean": 0.0, "glob_std": 500.0}'],
                         help='List of dicts of scaling parameters for LR conditions, in JSON-like string format dict')

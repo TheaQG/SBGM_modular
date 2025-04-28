@@ -134,7 +134,7 @@ class Encoder(ResNet):
         self.block = block
         self.block_layers = block_layers
         self.time_embedding = time_embedding
-        self.input_channels = input_channels
+        self.input_channels = input_channels + 1 # +1 for the HR image (noised)
         self.n_heads = n_heads
         self.num_classes = num_classes
 
@@ -155,8 +155,7 @@ class Encoder(ResNet):
             self.input_channels += 1
         if cond_on_topo:
             self.input_channels += 1
-        if cond_on_img:
-            self.input_channels += cond_img_dim[0]
+
         
         # Initialize the sinusoidal time embedding layer with the given time_embedding
         self.sinusiodal_embedding = SinusoidalEmbedding(self.time_embedding).to(self.device)
